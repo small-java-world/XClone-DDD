@@ -1,0 +1,363 @@
+---
+description: ユースケースの命名規則と単一責務の原則
+globs: ["**/src/main/kotlin/**/application/usecase/**/*.kt"]
+alwaysApply: false
+---
+# ユースケースの命名規則と単一責務の原則
+
+## このルールの要約
+- 各ユースケースクラスは単一の機能や操作だけを扱う
+- クラス名は「動詞+名詞+UseCase」の形式に従う
+- コマンドとクエリの責務を分離する
+- 入力モデルと出力モデルを明確に定義する
+
+## ユースケースの基本原則
+
+### 単一責務の原則（SRP）
+- 各ユースケースクラスは単一の機能や操作だけを扱う
+- メリット：
+  - 責任が明確
+  - テストが容易
+  - 変更の影響が局所的
+  - 再利用可能
+
+### コマンド・クエリ責務分離（CQRS）
+- コマンド：システムの状態を変更する操作（作成、更新、削除など）
+- クエリ：システムから情報を取得する操作
+- これらを明確に分離することで、モデルの最適化が可能になる
+- クエリ操作はクエリサービスを利用し、DTOを直接返すことでパフォーマンスを最適化
+
+#### CQRSの実装レベル
+1. **メソッドレベル**: 同じサービス内で読み取りと書き込みメソッドを分離
+2. **クラスレベル**: コマンドユースケースとクエリユースケースを別々のクラスに分割
+3. **モデルレベル**: コマンド用と照会用に異なるモデルを使用（最も明確な分離）
+   - コマンド: ドメインモデルを中心に操作
+   - クエリ: DTOを中心に操作、クエリサービス経由でデータアクセス
+
+## 命名規則
+
+### クラス名
+- `動詞 + 名詞 + UseCase` の形式に従う
+- 例：
+  - `CreateProductUseCase`
+  - `UpdateUserProfileUseCase`
+  - `FindProductByIdUseCase`
+  - `GetOrderHistoryUseCase`
+
+### メソッド名
+- 基本的に `execute` または非同期処理の場合は `executeAsync`
+- 引数は通常、専用の入力モデルを使用
+
+```kotlin
+class CreateProductUseCase(/* 依存関係 */) {
+    fun execute(command: CreateProductCommand): ProductId {
+        // 実装
+    }
+}
+
+class FindProductByIdUseCase(/* 依存関係 */) {
+    fun execute(query: FindProductByIdQuery): ProductDto? {
+        // 実装
+    }
+}
+```
+
+## ユースケース実装パターン
+
+### 基本構造
+- 依存関係をコンストラクタで注入
+- 単一の `execute` メソッドを提供
+- 実装はドメインサービスとリポジトリを組み合わせる
+
+### コマンドユースケース実装
+
+コマンドユースケースはドメインモデルとリポジトリを使用して状態変更を行います：
+
+```kotlin
+@UseCase
+class CreateProductUseCase(
+    private val productRepository: ProductRepository,
+    private val eventPublisher: DomainEventPublisher
+) {
+    fun execute(command: CreateProductCommand): ProductId {
+        // バリデーション
+        validateCommand(command)
+        
+        // ドメインオブジェクトの生成
+        val product = Product.create(
+            sellerId = SellerId.from(command.sellerId),
+            name = ProductName.from(command.name),
+            description = ProductDescription.from(command.description),
+            imageIds = command.imageIds.map { ImageId.from(it) },
+            price = Price.from(command.price)
+        )
+        
+        // 永続化
+        val savedProduct = productRepository.save(product)
+        
+        // イベント発行
+        eventPublisher.publish(ProductCreatedEvent(savedProduct.id))
+        
+        // 結果を返す
+        return savedProduct.id
+    }
+    
+    private fun validateCommand(command: CreateProductCommand) {
+        // 追加のバリデーションロジック
+    }
+}
+```
+
+### クエリユースケース実装
+
+クエリユースケースはクエリサービスを使用してデータを取得します：
+
+```kotlin
+@UseCase
+class GetProductDetailsUseCase(
+    private val productQueryService: ProductQueryService
+) {
+    fun execute(query: GetProductDetailsQuery): ProductDetailDto? {
+        // クエリサービスを使用して直接DTOを取得
+        return productQueryService.findProductWithDetails(query.productId)
+    }
+}
+
+@UseCase
+class SearchProductsUseCase(
+    private val productQueryService: ProductQueryService
+) {
+    fun execute(query: SearchProductsQuery): Page<ProductSummaryDto> {
+        // 検索条件を構築
+        val filters = mutableMapOf<String, Any>()
+        
+        if (query.minPrice != null) {
+            filters["minPrice"] = query.minPrice
+        }
+        
+        if (query.maxPrice != null) {
+            filters["maxPrice"] = query.maxPrice
+        }
+        
+        if (query.categoryIds != null && query.categoryIds.isNotEmpty()) {
+            filters["categoryIds"] = query.categoryIds
+        }
+        
+        // クエリサービスを使用して検索結果を取得
+        return productQueryService.searchProducts(
+            keyword = query.keyword,
+            filters = filters,
+            pageable = PageRequest.of(
+                query.page, 
+                query.size,
+                Sort.by(query.sortDirection, query.sortBy)
+            )
+        )
+    }
+}
+```
+
+### 入力モデル（コマンド/クエリ）
+
+```kotlin
+// コマンド例
+data class CreateProductCommand(
+    val sellerId: UUID,
+    val name: String,
+    val description: String,
+    val imageIds: List<UUID>,
+    val price: BigDecimal
+)
+
+// クエリ例
+data class GetProductDetailsQuery(
+    val productId: UUID
+)
+
+data class SearchProductsQuery(
+    val keyword: String?,
+    val minPrice: BigDecimal?,
+    val maxPrice: BigDecimal?,
+    val categoryIds: List<UUID>?,
+    val page: Int = 0,
+    val size: Int = 20,
+    val sortBy: String = "createdAt",
+    val sortDirection: Sort.Direction = Sort.Direction.DESC
+)
+```
+
+### 出力モデル（DTO）
+
+```kotlin
+data class ProductDto(
+    val id: UUID,
+    val sellerId: UUID,
+    val name: String,
+    val description: String,
+    val imageUrls: List<String>,
+    val price: BigDecimal,
+    val status: String,
+    val createdAt: Instant,
+    val updatedAt: Instant
+)
+
+data class ProductDetailDto(
+    val id: UUID,
+    val sellerId: UUID,
+    val sellerName: String, // 結合データ
+    val sellerRating: Double, // 結合データ
+    val name: String,
+    val description: String,
+    val imageUrls: List<String>,
+    val price: BigDecimal,
+    val categoryName: String, // 結合データ
+    val averageRating: Double, // 集計データ
+    val reviewCount: Int, // 集計データ
+    val status: String,
+    val createdAt: Instant
+)
+```
+
+### 例外処理
+
+ユースケース専用の例外を定義し、適切に投げる：
+
+```kotlin
+class ProductNotFoundException(productId: UUID) : 
+    DomainException("Product with ID $productId not found")
+    
+class InsufficientPermissionException(message: String) : 
+    DomainException(message)
+    
+// ユースケースでの使用例
+fun execute(query: FindProductByIdQuery): ProductDto {
+    val product = productRepository.findById(ProductId.from(query.productId))
+        ?: throw ProductNotFoundException(query.productId)
+        
+    // アクセス制御
+    if (!canAccess(query.requesterId, product)) {
+        throw InsufficientPermissionException("User cannot access this product")
+    }
+    
+    return productMapper.toDto(product)
+}
+```
+
+## ユースケースの構成要素
+
+### 依存性の注入
+- 全ての依存関係はコンストラクタを通じて注入する
+- これにより、テスト可能性と柔軟性が向上する
+
+```kotlin
+@UseCase
+class UpdateProductUseCase(
+    private val productRepository: ProductRepository,
+    private val productAccessPolicy: ProductAccessPolicy,
+    private val eventPublisher: DomainEventPublisher
+) {
+    // 実装
+}
+```
+
+### トランザクション管理
+- トランザクション境界はユースケースレベルで定義する
+- Spring Bootでは `@Transactional` を使用
+
+```kotlin
+@UseCase
+@Transactional
+class PlaceOrderUseCase(
+    private val orderRepository: OrderRepository,
+    private val productRepository: ProductRepository,
+    private val eventPublisher: DomainEventPublisher
+) {
+    fun execute(command: PlaceOrderCommand): OrderId {
+        // 複数のエンティティに跨る操作をトランザクション内で実行
+    }
+}
+```
+
+### イベント発行
+- ドメインイベントはユースケース内で発行する
+- リポジトリ操作の後に発行する
+
+```kotlin
+@Transactional
+fun execute(command: UpdateProductCommand): ProductId {
+    // リポジトリから取得
+    val product = productRepository.findById(ProductId.from(command.productId))
+        ?: throw ProductNotFoundException(command.productId)
+    
+    // ドメインロジックを実行
+    val updatedProduct = product.update(
+        name = ProductName.from(command.name),
+        description = ProductDescription.from(command.description),
+        price = Price.from(command.price)
+    )
+    
+    // 永続化
+    val savedProduct = productRepository.save(updatedProduct)
+    
+    // イベント発行
+    eventPublisher.publish(ProductUpdatedEvent(savedProduct.id))
+    
+    return savedProduct.id
+}
+```
+
+## クエリサービスとユースケースの連携
+
+クエリサービスはアダプター層に配置され、データベースに最適化されたクエリを実行します。ユースケースはこれを利用して複雑なデータ取得を行います：
+
+```kotlin
+// アダプター層のクエリサービス
+@Service
+class ProductQueryServiceImpl(private val dsl: DSLContext) : ProductQueryService {
+    // 複雑なクエリを実行する実装
+    override fun findProductsWithReviews(minRating: Double): List<ProductWithReviewsDto> {
+        // 複数テーブル結合と集計を含む最適化されたクエリ
+    }
+}
+
+// アプリケーション層のユースケース
+@UseCase
+class FindTopRatedProductsUseCase(private val productQueryService: ProductQueryService) {
+    fun execute(query: FindTopRatedProductsQuery): List<ProductWithReviewsDto> {
+        return productQueryService.findProductsWithReviews(query.minRating)
+    }
+}
+```
+
+### リポジトリとクエリサービスの使い分け
+- リポジトリ：集約単位のライフサイクル管理（作成、更新、削除）
+- クエリサービス：複雑なデータ取得、結合クエリ、集計クエリ
+
+## テスト戦略
+
+各ユースケースは単体テストを書きやすく設計する：
+
+```kotlin
+class CreateProductUseCaseTest {
+    private lateinit var productRepository: ProductRepository
+    private lateinit var eventPublisher: DomainEventPublisher
+    private lateinit var useCase: CreateProductUseCase
+    
+    @BeforeEach
+    fun setup() {
+        productRepository = mock(ProductRepository::class.java)
+        eventPublisher = mock(DomainEventPublisher::class.java)
+        useCase = CreateProductUseCase(productRepository, eventPublisher)
+    }
+    
+    @Test
+    fun `execute should create product and return product id`() {
+        // テストの実装
+    }
+    
+    @Test
+    fun `execute should throw exception when validation fails`() {
+        // 例外テストの実装
+    }
+}
+``` 

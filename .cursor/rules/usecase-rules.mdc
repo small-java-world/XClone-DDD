@@ -1,0 +1,348 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: ユースケースの命名規則と単一責務の原則
+globs: ["**/application/usecase/**/*.kt", "**/application/usecase/**/*.java"]
+---
+# ユースケースの命名規則と単一責務の原則
+
+このルールは、アプリケーション層におけるユースケースクラスの命名規則と単一責務の原則（SRP）の適用方法を定義します。ユースケースはアプリケーションの機能を実現するためのロジックをカプセル化し、ドメイン層とインターフェース層の間の橋渡しをします。
+
+## ユースケースの基本原則
+
+### 単一責務の原則（SRP）
+
+1つのユースケースクラスは、1つの機能または操作のみを担当します。これにより以下の利点が得られます：
+
+- **明確な責任範囲**：各クラスの役割が明確になる
+- **テスト容易性**：単一の機能に焦点を当てたテストが書きやすくなる
+- **変更の局所化**：1つの機能に変更があっても、他の機能に影響を与えない
+- **再利用性**：単一機能のユースケースは他の場所でも再利用しやすい
+
+❌ 悪い例（複数の責務）：
+```kotlin
+// 複数の操作を1つのクラスに詰め込んでいる
+class PostManagementUseCase(private val postRepository: PostRepository) {
+    fun createPost(command: CreatePostCommand): PostId { /* ... */ }
+    fun editPost(command: EditPostCommand): PostId { /* ... */ }
+    fun deletePost(command: DeletePostCommand) { /* ... */ }
+    fun likePost(command: LikePostCommand) { /* ... */ }
+}
+```
+
+✅ 良い例（単一の責務）：
+```kotlin
+// 各操作が独立したクラスとして実装されている
+class CreatePostUseCase(private val postRepository: PostRepository) {
+    fun execute(command: CreatePostCommand): PostId { /* ... */ }
+}
+
+class EditPostUseCase(private val postRepository: PostRepository) {
+    fun execute(command: EditPostCommand): PostId { /* ... */ }
+}
+
+class DeletePostUseCase(private val postRepository: PostRepository) {
+    fun execute(command: DeletePostCommand) { /* ... */ }
+}
+
+class LikePostUseCase(private val postRepository: PostRepository, private val userRepository: UserRepository) {
+    fun execute(command: LikePostCommand) { /* ... */ }
+}
+```
+
+## ユースケースの命名規則
+
+### クラス名
+
+ユースケースクラスの命名規則は以下の通りです：
+
+1. **動詞 + 名詞 + UseCase**：クラス名は「何をするか」を明確に示す
+   - 例：`CreatePostUseCase`, `UpdateUserProfileUseCase`, `FetchTimelineUseCase`
+
+2. **操作タイプによる接頭辞**：
+   - 作成操作：`Create`, `Register`, `Add`
+   - 更新操作：`Update`, `Edit`, `Modify`
+   - 削除操作：`Delete`, `Remove`
+   - 取得操作：`Get`, `Fetch`, `Find`, `Search`, `List`
+   - その他の操作：`Process`, `Calculate`, `Generate`, `Verify`など
+
+3. **集約単位でのグループ化**：同じ集約に関連するユースケースは同じパッケージに配置
+
+```
+com.example.xclone.application.usecase
+├── post                           # 投稿に関するユースケース
+│   ├── CreatePostUseCase.kt
+│   ├── DeletePostUseCase.kt
+│   ├── EditPostUseCase.kt
+│   ├── GetPostUseCase.kt
+│   └── ListPostsByUserUseCase.kt
+├── user                           # ユーザーに関するユースケース
+│   ├── RegisterUserUseCase.kt
+│   ├── UpdateUserProfileUseCase.kt
+│   ├── ChangePasswordUseCase.kt
+│   └── GetUserProfileUseCase.kt
+└── timeline                       # タイムラインに関するユースケース
+    ├── GenerateHomeTimelineUseCase.kt
+    └── GenerateUserTimelineUseCase.kt
+```
+
+### メソッド名
+
+ユースケースクラスのメソッド名は以下の通りです：
+
+1. **主メソッド**：`execute`（標準的な実行メソッド）
+   ```kotlin
+   class CreatePostUseCase(private val postRepository: PostRepository) {
+       fun execute(command: CreatePostCommand): PostId { /* ... */ }
+   }
+   ```
+
+2. **非同期メソッド**：`executeAsync`（非同期実行が必要な場合）
+   ```kotlin
+   class GenerateTimelineUseCase(private val timelineService: TimelineService) {
+       suspend fun executeAsync(query: TimelineQuery): Timeline { /* ... */ }
+   }
+   ```
+
+## コマンドとクエリの分離（CQRS原則）
+
+コマンド（状態を変更する操作）とクエリ（データを取得する操作）を明確に分離します：
+
+1. **コマンドユースケース**：状態を変更するが、詳細な情報は返さない
+   ```kotlin
+   class CreatePostUseCase(private val postRepository: PostRepository) {
+       fun execute(command: CreatePostCommand): PostId {
+           // 投稿の作成処理
+           return createdPostId
+       }
+   }
+   
+   data class CreatePostCommand(
+       val authorId: UserId,
+       val content: String,
+       val mediaIds: List<String>?
+   )
+   ```
+
+2. **クエリユースケース**：状態を変更せず、データのみを返す
+   ```kotlin
+   class GetPostUseCase(private val postRepository: PostRepository) {
+       fun execute(query: GetPostQuery): PostDto {
+           // 投稿の取得処理
+           return postDto
+       }
+   }
+   
+   data class GetPostQuery(val postId: PostId)
+   ```
+
+## ユースケースの実装パターン
+
+### 入力モデル（Input Model）
+
+ユースケースの入力は、専用のデータクラス（CommandまたはQuery）としてカプセル化します：
+
+```kotlin
+data class UpdateUserProfileCommand(
+    val userId: UserId,
+    val displayName: String?,
+    val bio: String?,
+    val profileImageUrl: String?
+)
+```
+
+入力モデルの命名規則：
+- コマンド：`{操作}Command` - 例：`CreatePostCommand`, `UpdateUserProfileCommand`
+- クエリ：`{操作}Query` - 例：`GetUserQuery`, `SearchPostsQuery`
+
+### 出力モデル（Output Model）
+
+ユースケースの出力も、必要に応じて専用のデータクラス（DTOなど）としてカプセル化します：
+
+```kotlin
+data class UserProfileDto(
+    val id: String,
+    val username: String,
+    val displayName: String,
+    val bio: String?,
+    val profileImageUrl: String?,
+    val followersCount: Int,
+    val followingCount: Int
+)
+```
+
+出力モデルの命名規則：
+- `{エンティティ}Dto` - 例：`UserDto`, `PostDto`
+- `{エンティティ}{用途}Dto` - 例：`UserSummaryDto`, `PostDetailsDto`
+
+### 例外処理
+
+ユースケース固有の例外を定義し、適切にスローします：
+
+```kotlin
+// アプリケーション層の例外基底クラス
+abstract class ApplicationException(message: String, cause: Throwable? = null) : 
+    RuntimeException(message, cause)
+
+// ユースケース固有の例外
+class PostNotFoundException(postId: PostId) : 
+    ApplicationException("投稿が見つかりません: $postId")
+
+class UserNotFoundException(userId: UserId) : 
+    ApplicationException("ユーザーが見つかりません: $userId")
+
+// ユースケースでの例外処理
+class GetPostUseCase(private val postRepository: PostRepository) {
+    fun execute(query: GetPostQuery): PostDto {
+        val post = postRepository.findById(query.postId)
+            ?: throw PostNotFoundException(query.postId)
+        
+        return PostDto.from(post)
+    }
+}
+```
+
+## ユースケースの構成要素
+
+### 依存性の注入
+
+ユースケースの依存性は、コンストラクタを通じて注入します：
+
+```kotlin
+class CreatePostUseCase(
+    private val postRepository: PostRepository,
+    private val mediaRepository: MediaRepository,
+    private val timelineService: TimelineService,
+    private val eventPublisher: DomainEventPublisher
+) {
+    fun execute(command: CreatePostCommand): PostId {
+        // 依存サービスを使用したロジック実装
+    }
+}
+```
+
+### トランザクション管理
+
+トランザクション境界はユースケースレベルで定義します：
+
+```kotlin
+@Transactional
+class TransferMoneyUseCase(
+    private val accountRepository: AccountRepository,
+    private val transactionRepository: TransactionRepository
+) {
+    fun execute(command: TransferMoneyCommand): TransactionId {
+        // トランザクション内で実行される処理
+        // すべての操作が成功するか、すべて失敗する
+    }
+}
+```
+
+### イベント発行
+
+ドメインイベントの発行はユースケース内で行います：
+
+```kotlin
+class RegisterUserUseCase(
+    private val userRepository: UserRepository,
+    private val passwordEncoder: PasswordEncoder,
+    private val eventPublisher: DomainEventPublisher
+) {
+    fun execute(command: RegisterUserCommand): UserId {
+        // ユーザー登録処理
+        val user = User(
+            id = UserId.generate(),
+            username = Username.from(command.username),
+            email = EmailAddress.from(command.email),
+            passwordHash = PasswordHash.from(command.password, passwordEncoder),
+            // その他のフィールド
+        )
+        
+        userRepository.save(user)
+        
+        // イベント発行
+        eventPublisher.publish(
+            UserRegisteredEvent(
+                userId = user.id,
+                username = user.username.value(),
+                timestamp = Instant.now()
+            )
+        )
+        
+        return user.id
+    }
+}
+```
+
+## ユースケースのテスト
+
+### ユニットテスト
+
+各ユースケースは単体でテスト可能です：
+
+```kotlin
+class CreatePostUseCaseTest : DescribeSpec({
+    describe("CreatePostUseCase") {
+        val postRepository = mockk<PostRepository>()
+        val mediaRepository = mockk<MediaRepository>()
+        val timelineService = mockk<TimelineService>()
+        val useCase = CreatePostUseCase(
+            postRepository, 
+            mediaRepository, 
+            timelineService
+        )
+        
+        context("正常系") {
+            it("投稿を作成しIDを返すこと") {
+                // モックの設定
+                every { postRepository.save(any()) } returns mockPost
+                every { mediaRepository.validateMediaExists(any()) } returns emptyList()
+                every { timelineService.addPostToTimelines(any()) } just runs
+                
+                // テスト実行
+                val result = useCase.execute(
+                    CreatePostCommand(
+                        authorId = UserId.from("user-1"),
+                        content = "テスト投稿",
+                        mediaIds = null
+                    )
+                )
+                
+                // 検証
+                result shouldBe PostId.from("post-1")
+                verify { postRepository.save(any()) }
+                verify { timelineService.addPostToTimelines(any()) }
+            }
+        }
+        
+        context("異常系") {
+            it("コンテンツが空の場合は例外をスローすること") {
+                // テスト実行と検証
+                shouldThrow<IllegalArgumentException> {
+                    useCase.execute(
+                        CreatePostCommand(
+                            authorId = UserId.from("user-1"),
+                            content = "",
+                            mediaIds = null
+                        )
+                    )
+                }
+            }
+        }
+    }
+})
+```
+
+## まとめ
+
+ユースケースの設計とコーディングにおいては、以下の点に注意してください：
+
+1. **単一責務の原則を遵守**：各ユースケースは1つの機能のみを担当
+2. **明確な命名規則に従う**：クラス名、メソッド名、入出力モデル名は意図を明確に表現
+3. **依存性を明示的に注入**：テスト容易性と柔軟性のため、コンストラクタインジェクションを使用
+4. **適切な入出力モデルを定義**：ドメインモデルの詳細を隠蔽し、API境界を明確に
+5. **例外処理を適切に行う**：アプリケーション固有の例外クラスを定義し活用する
+6. **テスト容易性を確保**：各ユースケースは単体でテスト可能な設計にする 

@@ -1,0 +1,493 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: リポジトリパターンの実装とインターフェース設計
+globs: ["**/domain/repository/**/*.kt", "**/domain/repository/**/*.java", "**/adapter/persistence/**/*.kt", "**/adapter/persistence/**/*.java"]
+---
+# リポジトリパターンの実装とインターフェース設計
+
+このルールは、ドメイン駆動設計（DDD）におけるリポジトリパターンの実装とインターフェース設計の原則を定義します。リポジトリパターンは、永続化の詳細をドメインロジックから分離し、集約の永続化を抽象化するための重要なパターンです。
+
+## リポジトリパターンの原則
+
+### 責務の分離
+
+リポジトリパターンでは、以下の責務を明確に分離します：
+
+1. **ドメイン層**：リポジトリインターフェースを定義
+2. **アダプター層**：リポジトリ実装と永続化の詳細を提供
+
+この分離により、ドメインロジックはデータベースや永続化の詳細に依存せず、テスト容易性と柔軟性が向上します。
+
+### 集約単位のリポジトリ
+
+リポジトリは集約単位で定義します。各集約ルートに対して1つのリポジトリを作成します。
+
+```kotlin
+// User集約のリポジトリ
+interface UserRepository {
+    fun findById(id: UserId): User?
+    fun findByUsername(username: Username): User?
+    fun findByEmail(email: EmailAddress): User?
+    fun save(user: User): User
+    fun delete(id: UserId)
+}
+
+// Post集約のリポジトリ
+interface PostRepository {
+    fun findById(id: PostId): Post?
+    fun findByAuthorId(authorId: UserId, limit: Int, offset: Int): List<Post>
+    fun save(post: Post): Post
+    fun delete(id: PostId)
+}
+```
+
+## リポジトリインターフェースの設計
+
+### 命名規則
+
+リポジトリインターフェースの命名規則は以下の通りです：
+
+- **インターフェース名**：集約ルート名 + `Repository`
+  - 例：`UserRepository`, `PostRepository`, `CommentRepository`
+
+### 標準メソッド
+
+リポジトリには、以下の標準メソッドを定義します：
+
+1. **findById**：IDによるエンティティの取得
+   ```kotlin
+   fun findById(id: EntityId): Entity?
+   ```
+
+2. **save**：エンティティの保存（作成または更新）
+   ```kotlin
+   fun save(entity: Entity): Entity
+   ```
+
+3. **delete**：エンティティの削除
+   ```kotlin
+   fun delete(id: EntityId)
+   // or
+   fun delete(entity: Entity)
+   ```
+
+4. **検索メソッド**：ビジネス要件に基づく検索
+   ```kotlin
+   fun findByXXX(xxx: XXX): Entity?
+   fun findAllByXXX(xxx: XXX): List<Entity>
+   ```
+
+### 戻り値の型
+
+リポジトリメソッドの戻り値の型には、以下の原則を適用します：
+
+1. **単一エンティティの取得**：`Entity?`（null許容型）または例外をスローするバージョンでは `Entity`
+2. **複数エンティティの取得**：`List<Entity>` または `Collection<Entity>`
+3. **保存操作**：通常は更新されたエンティティを返す `Entity`
+4. **削除操作**：通常は `Unit` （何も返さない）
+
+### ページネーションとソート
+
+大量のデータを扱う場合は、ページネーションとソートのサポートを追加します：
+
+```kotlin
+interface PostRepository {
+    // ページネーションとソートのサポート
+    fun findAll(pageable: Pageable): Page<Post>
+    fun findByAuthorId(authorId: UserId, pageable: Pageable): Page<Post>
+}
+
+// ページネーションとソートのパラメータ
+data class Pageable(
+    val page: Int,
+    val size: Int,
+    val sort: Sort? = null
+)
+
+data class Sort(
+    val property: String,
+    val direction: SortDirection
+)
+
+enum class SortDirection {
+    ASC, DESC
+}
+
+// ページネーション結果
+data class Page<T>(
+    val content: List<T>,
+    val totalElements: Long,
+    val totalPages: Int,
+    val number: Int,
+    val size: Int
+)
+```
+
+### 高度な検索条件
+
+複雑な検索条件を表現するために、Specification パターンや検索条件オブジェクトを使用できます：
+
+```kotlin
+interface PostRepository {
+    // Specificationパターンを使用した検索
+    fun findAll(specification: PostSpecification, pageable: Pageable): Page<Post>
+}
+
+// 検索条件を表すインターフェース
+interface Specification<T> {
+    fun isSatisfiedBy(entity: T): Boolean
+    fun toSqlPredicate(): String // DB実装用
+}
+
+// 投稿検索条件
+data class PostSearchCriteria(
+    val authorId: UserId? = null,
+    val content: String? = null,
+    val startDate: LocalDateTime? = null,
+    val endDate: LocalDateTime? = null,
+    val status: PostStatus? = null
+)
+```
+
+## リポジトリ実装の原則
+
+### インフラストラクチャとの分離
+
+リポジトリの実装はアダプター層に配置し、特定のインフラストラクチャ技術（JPA、MyBatisなど）に依存します：
+
+```kotlin
+@Repository
+class JpaUserRepositoryImpl(
+    private val userJpaRepository: UserJpaRepository,
+    private val userMapper: UserMapper
+) : UserRepository {
+    
+    override fun findById(id: UserId): User? {
+        return userJpaRepository.findById(id.value())
+            .map { userMapper.toDomain(it) }
+            .orElse(null)
+    }
+    
+    override fun save(user: User): User {
+        val userEntity = userMapper.toEntity(user)
+        val savedEntity = userJpaRepository.save(userEntity)
+        return userMapper.toDomain(savedEntity)
+    }
+    
+    // その他のメソッド実装
+}
+```
+
+### エンティティマッピング
+
+ドメインモデルとデータベースエンティティ間のマッピングを担当するマッパークラスを作成します：
+
+```kotlin
+@Component
+class UserMapper {
+    fun toDomain(entity: UserEntity): User {
+        return User(
+            id = UserId.from(entity.id),
+            username = Username.from(entity.username),
+            email = EmailAddress.from(entity.email),
+            passwordHash = PasswordHash.from(entity.passwordHash),
+            displayName = DisplayName.from(entity.displayName),
+            profileImageUrl = entity.profileImageUrl?.let { ProfileImageUrl.from(it) },
+            bio = entity.bio?.let { UserBio.from(it) },
+            status = UserStatus.valueOf(entity.status),
+            createdAt = CreatedAt.from(entity.createdAt),
+            updatedAt = UpdatedAt.from(entity.updatedAt)
+        )
+    }
+    
+    fun toEntity(domain: User): UserEntity {
+        return UserEntity(
+            id = domain.id.value(),
+            username = domain.username.value(),
+            email = domain.email.value(),
+            passwordHash = domain.passwordHash.value(),
+            displayName = domain.displayName.value(),
+            profileImageUrl = domain.profileImageUrl?.value(),
+            bio = domain.bio?.value(),
+            status = domain.status.name,
+            createdAt = domain.createdAt.value(),
+            updatedAt = domain.updatedAt.value()
+        )
+    }
+}
+```
+
+### トランザクション管理
+
+リポジトリ実装ではトランザクション管理を制御しません。トランザクション境界はユースケースレベルで定義します：
+
+```kotlin
+@Repository
+class JpaPostRepositoryImpl(
+    private val postJpaRepository: PostJpaRepository,
+    private val postMapper: PostMapper
+) : PostRepository {
+    // トランザクション管理はここでは行わない
+    // @Transactionalアノテーションはユースケースクラスに付与
+    
+    override fun findById(id: PostId): Post? {
+        return postJpaRepository.findById(id.value())
+            .map { postMapper.toDomain(it) }
+            .orElse(null)
+    }
+    
+    // その他のメソッド実装
+}
+```
+
+### キャッシュ管理
+
+必要に応じて、リポジトリレベルでキャッシュを実装できます：
+
+```kotlin
+@Repository
+class CachingUserRepositoryImpl(
+    private val userRepository: UserRepository,
+    private val cacheManager: CacheManager
+) : UserRepository {
+    
+    override fun findById(id: UserId): User? {
+        // キャッシュから取得を試みる
+        val cachedUser = cacheManager.getCache("users").get(id.value(), User::class.java)
+        if (cachedUser != null) {
+            return cachedUser
+        }
+        
+        // キャッシュになければリポジトリから取得
+        val user = userRepository.findById(id)
+        if (user != null) {
+            cacheManager.getCache("users").put(id.value(), user)
+        }
+        
+        return user
+    }
+    
+    // その他のメソッド実装（キャッシュの無効化なども含む）
+}
+```
+
+## リポジトリの実装パターン
+
+### Spring Data JPAを使用した実装
+
+Spring Data JPAを使用する場合、Spring Dataリポジトリインターフェースとドメインリポジトリの両方を定義します：
+
+```kotlin
+// Spring Data JPAリポジトリ（アダプター層）
+interface UserJpaRepository : JpaRepository<UserEntity, UUID> {
+    fun findByUsername(username: String): Optional<UserEntity>
+    fun findByEmail(email: String): Optional<UserEntity>
+}
+
+// ドメインリポジトリ実装（アダプター層）
+@Repository
+class SpringDataUserRepositoryImpl(
+    private val userJpaRepository: UserJpaRepository,
+    private val userMapper: UserMapper
+) : UserRepository {
+    
+    override fun findById(id: UserId): User? {
+        return userJpaRepository.findById(id.value())
+            .map { userMapper.toDomain(it) }
+            .orElse(null)
+    }
+    
+    override fun findByUsername(username: Username): User? {
+        return userJpaRepository.findByUsername(username.value())
+            .map { userMapper.toDomain(it) }
+            .orElse(null)
+    }
+    
+    // その他のメソッド実装
+}
+```
+
+### jOOQを使用した実装
+
+型安全なSQLクエリビルダーであるjOOQを使用する場合の例：
+
+```kotlin
+// jOOQを使用したリポジトリ実装（アダプター層）
+@Repository
+class JooqPostRepositoryImpl(
+    private val dsl: DSLContext,
+    private val postMapper: PostMapper
+) : PostRepository {
+    
+    override fun findById(id: PostId): Post? {
+        val record = dsl.selectFrom(POSTS)
+            .where(POSTS.ID.eq(id.value()))
+            .fetchOne()
+        
+        return record?.let { postMapper.toDomain(it) }
+    }
+    
+    override fun findByAuthorId(authorId: UserId, limit: Int, offset: Int): List<Post> {
+        val records = dsl.selectFrom(POSTS)
+            .where(POSTS.AUTHOR_ID.eq(authorId.value()))
+            .orderBy(POSTS.CREATED_AT.desc())
+            .limit(limit)
+            .offset(offset)
+            .fetch()
+        
+        return records.map { postMapper.toDomain(it) }
+    }
+    
+    // その他のメソッド実装
+}
+```
+
+### 複合リポジトリ
+
+異なるリポジトリ実装を組み合わせて使用する例：
+
+```kotlin
+// 読み取り用リポジトリと書き込み用リポジトリを分離
+interface PostReadRepository {
+    fun findById(id: PostId): Post?
+    fun findByAuthorId(authorId: UserId, limit: Int, offset: Int): List<Post>
+}
+
+interface PostWriteRepository {
+    fun save(post: Post): Post
+    fun delete(id: PostId)
+}
+
+// 統合リポジトリ
+@Repository
+class CompositePostRepositoryImpl(
+    private val postReadRepository: PostReadRepository,
+    private val postWriteRepository: PostWriteRepository
+) : PostRepository {
+    
+    override fun findById(id: PostId): Post? {
+        return postReadRepository.findById(id)
+    }
+    
+    override fun findByAuthorId(authorId: UserId, limit: Int, offset: Int): List<Post> {
+        return postReadRepository.findByAuthorId(authorId, limit, offset)
+    }
+    
+    override fun save(post: Post): Post {
+        return postWriteRepository.save(post)
+    }
+    
+    override fun delete(id: PostId) {
+        postWriteRepository.delete(id)
+    }
+}
+```
+
+## リポジトリのテスト戦略
+
+### モックリポジトリ
+
+テスト用のモックリポジトリ実装：
+
+```kotlin
+// テスト用のインメモリリポジトリ
+class InMemoryUserRepository : UserRepository {
+    private val users = mutableMapOf<UUID, User>()
+    
+    override fun findById(id: UserId): User? {
+        return users[id.value()]
+    }
+    
+    override fun findByUsername(username: Username): User? {
+        return users.values.find { it.username == username }
+    }
+    
+    override fun save(user: User): User {
+        users[user.id.value()] = user
+        return user
+    }
+    
+    override fun delete(id: UserId) {
+        users.remove(id.value())
+    }
+    
+    // テスト用の補助メソッド
+    fun clear() {
+        users.clear()
+    }
+    
+    fun count(): Int {
+        return users.size
+    }
+}
+```
+
+### 結合テスト
+
+Spring Bootを使用したリポジトリの結合テスト：
+
+```kotlin
+@DataJpaTest
+class JpaUserRepositoryImplTest {
+    
+    @Autowired
+    private lateinit var userJpaRepository: UserJpaRepository
+    
+    private lateinit var userMapper: UserMapper
+    private lateinit var userRepository: UserRepository
+    
+    @BeforeEach
+    fun setup() {
+        userMapper = UserMapper()
+        userRepository = JpaUserRepositoryImpl(userJpaRepository, userMapper)
+    }
+    
+    @Test
+    fun `findById should return user when user exists`() {
+        // Setup
+        val userEntity = UserEntity(
+            id = UUID.randomUUID(),
+            username = "testuser",
+            email = "test@example.com",
+            // その他の必要なフィールド
+        )
+        userJpaRepository.save(userEntity)
+        
+        // Execute
+        val result = userRepository.findById(UserId.from(userEntity.id))
+        
+        // Verify
+        assertThat(result).isNotNull
+        assertThat(result?.username?.value()).isEqualTo("testuser")
+        assertThat(result?.email?.value()).isEqualTo("test@example.com")
+    }
+    
+    // その他のテストケース
+}
+```
+
+## ベストプラクティス
+
+1. **リポジトリインターフェースはドメイン層に定義**
+   - リポジトリインターフェースはドメイン層で定義し、ドメインモデルの言葉で表現
+   - 技術的な詳細（JPA、SQL）には言及しない
+
+2. **集約ルート単位でリポジトリを定義**
+   - 1つの集約に対して1つのリポジトリインターフェースを定義
+   - 集約内の子エンティティは集約ルートを通じてのみアクセス
+
+3. **永続化の詳細はアダプター層に閉じ込める**
+   - データベースのテーブル構造やORM関連の詳細はアダプター層に隠蔽
+   - ドメインモデルとDBエンティティの変換も永続化アダプター内で行う
+
+4. **リポジトリメソッドは適切な名前を付ける**
+   - メソッド名からどのような検索が行われるかが明確になるようにする
+   - 例：`findByUsername`, `findActivePostsByAuthorId`
+
+5. **無駄なDBアクセスを減らす戦略を考慮**
+   - 必要に応じてキャッシュ戦略を実装
+   - N+1問題を回避するための適切なフェッチ戦略を採用 

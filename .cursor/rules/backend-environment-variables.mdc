@@ -48,32 +48,6 @@ globs: ["**/*.kt", "**/*.java", "**/application.yml", "**/application.properties
       }
   }
   ```
-- または、dotenvライブラリを使用してアプリケーション起動時に`.env.local`を読み込んでください
-  ```kotlin
-  // Application.kt
-  import io.github.cdimascio.dotenv.Dotenv
-  
-  @SpringBootApplication
-  class Application {
-      companion object {
-          @JvmStatic
-          fun main(args: Array<String>) {
-              // .env.localから環境変数を読み込む
-              val dotenv = Dotenv.configure()
-                  .filename(".env.local")
-                  .ignoreIfMissing()
-                  .load()
-              
-              // 環境変数をシステムプロパティに設定
-              dotenv.entries().forEach { entry ->
-                  System.setProperty(entry.key, entry.value)
-              }
-              
-              runApplication<Application>(*args)
-          }
-      }
-  }
-  ```
 - 設定の優先順位を理解し、環境変数 > システムプロパティ > 設定ファイルの順で適用されることを考慮してください
 
 ### バックエンド環境変数の命名規則

@@ -1,0 +1,302 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: ドメイン境界の定義とパッケージ名規則
+globs: ["**/domain/**/*.kt", "**/domain/**/*.java"]
+---
+# ドメイン境界の定義とパッケージ名規則
+
+このルールは、ドメイン駆動設計（DDD）におけるドメイン境界の定義方法とパッケージ名規則を定義します。
+
+## 境界付けられたコンテキスト（Bounded Context）
+
+境界付けられたコンテキストは、特定のドメインモデルが適用される範囲を定義します。各コンテキスト内では一貫した用語と概念を使用し、異なるコンテキスト間での概念の重複や矛盾を許容します。
+
+### 主要な境界付けられたコンテキスト
+
+当プロジェクトでは、以下の境界付けられたコンテキストを定義します：
+
+1. **ユーザーコンテキスト**：ユーザーアカウント、プロフィール、認証に関する概念
+2. **投稿コンテキスト**：投稿の作成、編集、削除に関する概念
+3. **タイムラインコンテキスト**：ユーザーのタイムライン表示に関する概念
+4. **エンゲージメントコンテキスト**：いいね、リポスト、コメントなどの相互作用に関する概念
+5. **通知コンテキスト**：システム通知やユーザー間通知に関する概念
+
+### コンテキストマップ
+
+コンテキスト間の関係を明確にするために、以下のような関係を定義します：
+
+- **上流/下流関係（Upstream/Downstream）**：一方が優先され、他方がそれに適応する関係
+  - 例：ユーザーコンテキスト（上流） ← 投稿コンテキスト（下流）
+
+- **共有カーネル（Shared Kernel）**：複数のコンテキストで共有される重要なモデル
+  - 例：ユーザーIDとプロファイル基本情報は複数のコンテキストで共有
+
+- **顧客/サプライヤー（Customer/Supplier）**：顧客の要求に応えるサプライヤーの関係
+  - 例：タイムラインコンテキスト（顧客） ← 投稿コンテキスト（サプライヤー）
+
+- **適合者（Conformist）**：上流モデルに完全に従う関係
+  - 例：通知コンテキストはユーザーコンテキストに適合
+
+- **腐敗防止層（Anticorruption Layer）**：異なるモデル間の翻訳を担当
+  - 例：外部APIとの連携時に導入
+
+## パッケージ構造と命名規則
+
+### ドメインパッケージの基本構造
+
+```
+com.example.xclone.domain
+├── model               # ドメインモデル（エンティティ、値オブジェクト）
+│   ├── user            # ユーザーコンテキスト
+│   ├── post            # 投稿コンテキスト
+│   ├── timeline        # タイムラインコンテキスト
+│   ├── engagement      # エンゲージメントコンテキスト
+│   └── notification    # 通知コンテキスト
+├── repository          # リポジトリインターフェース
+├── service             # ドメインサービス
+└── event               # ドメインイベント
+```
+
+### 命名規則
+
+#### パッケージ名
+
+- 小文字のみを使用する
+- 短く意味のある名前を使用する
+- 単数形を使用する（例：`user`、`post`、`timeline`）
+
+#### ドメインモデルのクラス名
+
+- **エンティティ**：ドメイン概念を直接表す名詞を使用
+  - 例：`User`、`Post`、`Comment`
+
+- **値オブジェクト**：属性を表す名詞または名詞句を使用
+  - 基本型を包む場合は対応する型 + 属性名を使用
+  - 例：`UserId`、`PostContent`、`EmailAddress`
+
+- **集約ルート**：エンティティと同様の命名規則に従い、集約ルートであることをドキュメントに明記
+  - 例：`User`（ユーザー集約のルート）、`Post`（投稿集約のルート）
+
+#### ドメインサービス
+
+- クラス名は「サービスが何をするか」を表す名詞を使用し、末尾に「Service」を付ける
+  - 例：`PasswordHashingService`、`TimelineGenerationService`
+
+#### リポジトリインターフェース
+
+- 操作対象のエンティティ名 + 「Repository」を使用
+  - 例：`UserRepository`、`PostRepository`
+
+#### ドメインイベント
+
+- 過去形の動詞 + 対象エンティティ + 「Event」を使用
+  - 例：`UserRegisteredEvent`、`PostCreatedEvent`、`CommentAddedEvent`
+
+## ドメインオブジェクトの設計原則
+
+### 値オブジェクト（Value Objects）
+
+値オブジェクトは不変であり、同じ属性を持つインスタンスは等価とみなされます。
+
+```kotlin
+@JvmInline
+value class EmailAddress private constructor(private val value: String) {
+    companion object {
+        fun from(email: String): EmailAddress {
+            require(isValidEmail(email)) { "無効なメールアドレス形式です: $email" }
+            return EmailAddress(email.lowercase())
+        }
+        
+        private fun isValidEmail(email: String): Boolean {
+            // メールアドレスのバリデーションロジック
+            val emailRegex = "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,6}".toRegex()
+            return email.matches(emailRegex)
+        }
+    }
+    
+    fun value(): String = value
+    override fun toString(): String = value
+}
+```
+
+#### 値オブジェクトの設計ガイドライン
+
+1. **不変性**：すべての値オブジェクトは不変（イミュータブル）にする
+2. **自己検証**：コンストラクタまたはファクトリメソッドでバリデーションを行う
+3. **概念的な全体性**：ビジネス上の1つの概念を表すようにする
+4. **等価性**：属性値のみによって等価性を判断する
+5. **副作用のない振る舞い**：メソッドは新しいインスタンスを返し、内部状態を変更しない
+
+### エンティティ（Entities）
+
+エンティティはIDによって識別され、ライフサイクルを通じて同一性を維持します。
+
+```kotlin
+data class User(
+    val id: UserId,
+    val username: Username,
+    val email: EmailAddress,
+    val passwordHash: PasswordHash,
+    val displayName: DisplayName,
+    val profileImageUrl: ProfileImageUrl?,
+    val bio: UserBio?,
+    val status: UserStatus,
+    val createdAt: CreatedAt,
+    val updatedAt: UpdatedAt
+) {
+    fun updateProfile(displayName: DisplayName, bio: UserBio?, profileImageUrl: ProfileImageUrl?): User {
+        return copy(
+            displayName = displayName,
+            bio = bio,
+            profileImageUrl = profileImageUrl,
+            updatedAt = UpdatedAt.now()
+        )
+    }
+    
+    fun deactivate(): User {
+        return copy(
+            status = UserStatus.INACTIVE,
+            updatedAt = UpdatedAt.now()
+        )
+    }
+    
+    fun changeEmail(newEmail: EmailAddress): User {
+        return copy(
+            email = newEmail,
+            updatedAt = UpdatedAt.now()
+        )
+    }
+}
+```
+
+#### エンティティの設計ガイドライン
+
+1. **識別子**：一意の識別子（ID）を持つ
+2. **可変性**：属性は変更可能だが、識別子は不変
+3. **整合性**：すべての変更後も整合性を維持する（不変条件を満たす）
+4. **ビジネスロジック**：ドメインロジックをメソッドとして実装する
+5. **状態変更メソッド**：副作用のない方法（新しいインスタンスを返す）が望ましい
+
+### 集約（Aggregates）
+
+集約はトランザクション整合性の境界を定義し、関連するエンティティと値オブジェクトをグループ化します。
+
+#### 集約の設計ガイドライン
+
+1. **集約ルート**：各集約は1つのエンティティをルートとして持つ
+2. **参照制約**：集約の外部からは集約ルートのみを参照可能
+3. **サイズ**：できるだけ小さく保つ（大きな集約は性能問題を引き起こす可能性がある）
+4. **一貫性境界**：トランザクション的に一貫性を保つべき境界を定義
+5. **ID参照**：異なる集約間はIDで参照する（直接参照しない）
+
+```kotlin
+// Post集約（集約ルート = Post）
+class Post(
+    val id: PostId,
+    val authorId: UserId,  // 別の集約（User）への参照はIDのみ
+    val content: PostContent,
+    private val _comments: MutableList<Comment> = mutableListOf(),
+    val createdAt: CreatedAt,
+    val updatedAt: UpdatedAt,
+    val status: PostStatus
+) {
+    // コメントは集約内部でのみ管理される
+    val comments: List<Comment>
+        get() = _comments.toList()
+    
+    fun addComment(userId: UserId, content: CommentContent): Comment {
+        val comment = Comment(
+            id = CommentId.generate(),
+            postId = this.id,
+            authorId = userId,
+            content = content,
+            createdAt = CreatedAt.now()
+        )
+        _comments.add(comment)
+        return comment
+    }
+    
+    fun removeComment(commentId: CommentId, userId: UserId) {
+        val comment = _comments.find { it.id == commentId }
+            ?: throw IllegalArgumentException("コメントが見つかりません")
+        
+        require(comment.authorId == userId || this.authorId == userId) {
+            "コメントを削除する権限がありません"
+        }
+        
+        _comments.remove(comment)
+    }
+}
+
+// Comment（集約内の子エンティティ）
+data class Comment(
+    val id: CommentId,
+    val postId: PostId,
+    val authorId: UserId,
+    val content: CommentContent,
+    val createdAt: CreatedAt
+)
+```
+
+## ドメイン間の通信
+
+### コンテキスト間の翻訳
+
+異なるコンテキスト間では、モデルの翻訳が必要になる場合があります。
+
+```kotlin
+// 通知コンテキストでの翻訳例
+class NotificationTranslationService(
+    private val userRepository: UserRepository
+) {
+    fun translatePostCreatedToNotification(event: PostCreatedEvent): List<Notification> {
+        val author = userRepository.findById(event.authorId)
+            ?: throw IllegalStateException("ユーザーが見つかりません")
+        
+        val followersIds = userRepository.findFollowersIds(event.authorId)
+        
+        return followersIds.map { followerId ->
+            Notification(
+                id = NotificationId.generate(),
+                userId = followerId,
+                type = NotificationType.NEW_POST,
+                actorId = event.authorId,
+                targetId = event.postId.toString(),
+                content = "${author.displayName.value()}さんが新しい投稿を作成しました",
+                isRead = false,
+                createdAt = CreatedAt.now()
+            )
+        }
+    }
+}
+```
+
+### 共有モデル
+
+複数のコンテキストで共有される基本的なモデルを定義できます。
+
+```kotlin
+// 共有カーネルのパッケージ
+package com.example.xclone.domain.shared
+
+// ユーザーの基本情報（複数のコンテキストで共有）
+data class UserBasicInfo(
+    val id: UserId,
+    val username: String,
+    val displayName: String,
+    val profileImageUrl: String?
+)
+```
+
+## まとめ
+
+ドメイン境界を適切に定義し、一貫したパッケージ名規則に従うことで、以下の利点が得られます：
+
+1. **概念的一貫性**：各コンテキスト内では一貫した用語と概念を使用
+2. **モジュール性**：明確な境界によって、システムの各部分を独立して開発・テスト可能
+3. **拡張性**：新しい機能を既存のコンテキストに追加、または新しいコンテキストとして実装可能
+4. **チーム分担**：異なるチームが異なるコンテキストを担当可能 

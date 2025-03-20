@@ -1,0 +1,439 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: データベース設計とマイグレーション規約
+globs: ["**/src/main/resources/db/migration/**/*.sql", "**/domain/model/**/*.kt", "**/infrastructure/persistence/**/*.kt"]
+---
+# データベース設計とマイグレーション規約
+
+このルールはデータベース設計とマイグレーションに関する規約を定義します。データベースはアプリケーションの永続化層の基盤となるため、一貫性のある設計と安全なマイグレーション手順が重要です。
+
+## テーブル設計の基本原則
+
+### 命名規則
+
+1. **テーブル名**
+   - 複数形の名詞を使用する（例: `users`, `posts`, `comments`）
+   - 複合語はスネークケースで表現する（例: `user_profiles`, `post_attachments`）
+   - プレフィックスやサフィックスは使用しない（例: ❌ `tbl_users`, `users_table`）
+
+2. **カラム名**
+   - スネークケースを使用する（例: `first_name`, `created_at`）
+   - テーブル名を接頭辞として含めない（例: ❌ `user_email` in `users` table）
+   - 意味が明確で自己説明的な名前を使用する
+
+3. **主キー**
+   - デフォルトの主キーカラム名は `id` とする
+   - UUID v7を使用する場合は `BINARY(16)` 型で定義する（[詳細は UUID 規約を参照](mdc:#))
+
+4. **外部キー**
+   - 参照するテーブル名の単数形に `_id` を付加する（例: `user_id`, `post_id`）
+   - 複合外部キーの場合は、適切な接頭辞を付ける（例: `author_user_id`, `editor_user_id`）
+
+5. **インデックス**
+   - `idx_テーブル名_カラム名` のフォーマットで命名する（例: `idx_users_email`）
+   - 複合インデックスの場合はカラム名をアンダースコアで連結する（例: `idx_posts_user_id_created_at`）
+
+6. **制約**
+   - 主キー制約: `pk_テーブル名`（例: `pk_users`）
+   - 外部キー制約: `fk_テーブル名_参照テーブル名`（例: `fk_comments_posts`）
+   - ユニーク制約: `uq_テーブル名_カラム名`（例: `uq_users_email`）
+
+### データ型と制約
+
+1. **推奨データ型**
+   - 主キー: `BINARY(16)` (UUID v7用)
+   - 文字列: `VARCHAR` (最大長を適切に設定)
+   - テキスト: `TEXT` (長文の場合)
+   - 整数: `INT` または `BIGINT`
+   - 小数: `DECIMAL(p,s)` (金額など精度が重要な場合)
+   - 真偽値: `BOOLEAN` または `TINYINT(1)`
+   - 日時: `TIMESTAMP` または `DATETIME`
+   - JSON: `JSON` (PostgreSQLやMySQLの最新バージョン)
+
+2. **NOT NULL制約**
+   - 基本的にすべてのカラムに `NOT NULL` 制約を付ける
+   - NULL許容が必要な場合のみ例外とする
+
+3. **デフォルト値**
+   - 作成日時: `created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP`
+   - 更新日時: `updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`
+   - 論理削除フラグ: `deleted_at TIMESTAMP NULL DEFAULT NULL`
+
+4. **日時関連のカラム**
+   - 作成日時: `created_at`
+   - 更新日時: `updated_at`
+   - 削除日時（論理削除）: `deleted_at`
+
+### アンチパターン
+
+以下の設計パターンは避けてください：
+
+1. **過度の正規化**: パフォーマンスに悪影響を及ぼす過度の正規化
+2. **巨大なテーブル**: 数百以上のカラムを持つテーブル
+3. **データ型の不一致**: 同じ概念に対して異なるテーブルで異なるデータ型を使用
+4. **複数の論理削除フラグ**: `is_deleted`, `active_flag` など複数の論理削除方式の混在
+
+## マイグレーション管理
+
+### Flyway規約
+
+1. **ファイル命名規則**
+   - 形式: `V{バージョン}__{説明}.sql`
+   - バージョン: 連番（例: `V1`, `V2`）または日付形式（例: `V20230101`）
+   - 説明: スネークケースで具体的な変更内容（例: `create_users_table`, `add_email_to_users`）
+   - 例: `V1__create_users_table.sql`, `V20230101__add_user_preferences.sql`
+
+2. **マイグレーションの適用タイミング**
+   - 開発環境: アプリケーション起動時にマイグレーションを自動実行
+   - テスト環境: テスト実行前にマイグレーションを自動実行
+   - 本番環境: デプロイプロセスの一部としてマイグレーションを実行（手動承認が必要）
+
+3. **バージョン管理**
+   - マイグレーションスクリプトはバージョン管理システム（Git）で管理する
+   - 一度コミットされたマイグレーションスクリプトは修正せず、新しいマイグレーションで対応する
+
+### マイグレーションスクリプトの作成ガイドライン
+
+1. **べき等性の確保**
+   - `CREATE TABLE IF NOT EXISTS` のような条件付き構文を使用する
+   - `DROP TABLE IF EXISTS` 等で既存オブジェクトの削除を安全に行う
+
+2. **トランザクション管理**
+   - 各マイグレーションスクリプトはトランザクションで囲む
+   - 例外: インデックス作成など一部の DDL はトランザクションに対応していない場合がある
+
+3. **コメント**
+   - 各マイグレーションスクリプトの先頭にはマイグレーションの目的を記述する
+   - 複雑なロジックや判断理由については補足コメントを付ける
+
+4. **データ移行**
+   - スキーマ変更とデータ移行は分離することを推奨
+   - 大量データの移行は別プロセスとして実行を検討する
+
+### マイグレーションスクリプト例
+
+以下は代表的なマイグレーションスクリプトの例です：
+
+#### テーブル作成
+
+```sql
+-- V1__create_users_table.sql
+-- ユーザーテーブルの作成
+
+CREATE TABLE IF NOT EXISTS users (
+    id BINARY(16) NOT NULL,
+    username VARCHAR(50) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    display_name VARCHAR(100) NOT NULL,
+    profile_image_url VARCHAR(2048),
+    bio TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    
+    PRIMARY KEY (id),
+    UNIQUE INDEX uq_users_username (username),
+    UNIQUE INDEX uq_users_email (email),
+    INDEX idx_users_status (status),
+    INDEX idx_users_created_at (created_at)
+);
+```
+
+#### テーブル変更
+
+```sql
+-- V2__add_verification_to_users.sql
+-- ユーザーテーブルにメール検証フラグを追加
+
+ALTER TABLE users
+ADD COLUMN email_verified BOOLEAN NOT NULL DEFAULT FALSE AFTER email,
+ADD COLUMN verification_token VARCHAR(100) NULL AFTER email_verified,
+ADD COLUMN verification_token_expires_at TIMESTAMP NULL AFTER verification_token,
+ADD INDEX idx_users_verification_token (verification_token);
+```
+
+#### データ更新
+
+```sql
+-- V3__migrate_user_statuses.sql
+-- 既存ユーザーのステータス値を新しい命名規則に更新
+
+UPDATE users
+SET status = 'ACTIVE'
+WHERE status = 'active';
+
+UPDATE users
+SET status = 'SUSPENDED'
+WHERE status = 'banned';
+
+UPDATE users
+SET status = 'PENDING'
+WHERE status = 'awaiting_verification';
+```
+
+## データベース設計例
+
+以下はアプリケーションの主要なテーブル設計例です：
+
+### ユーザー関連テーブル
+
+```sql
+CREATE TABLE users (
+    id BINARY(16) NOT NULL,
+    username VARCHAR(50) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    password_hash VARCHAR(255) NOT NULL,
+    display_name VARCHAR(100) NOT NULL,
+    profile_image_url VARCHAR(2048),
+    bio TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    
+    PRIMARY KEY (id),
+    UNIQUE INDEX uq_users_username (username),
+    UNIQUE INDEX uq_users_email (email)
+);
+
+CREATE TABLE user_preferences (
+    id BINARY(16) NOT NULL,
+    user_id BINARY(16) NOT NULL,
+    theme VARCHAR(20) NOT NULL DEFAULT 'LIGHT',
+    notification_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    email_notification_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    language VARCHAR(10) NOT NULL DEFAULT 'ja',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    PRIMARY KEY (id),
+    UNIQUE INDEX uq_user_preferences_user_id (user_id),
+    CONSTRAINT fk_user_preferences_users FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+```
+
+### 投稿関連テーブル
+
+```sql
+CREATE TABLE posts (
+    id BINARY(16) NOT NULL,
+    user_id BINARY(16) NOT NULL,
+    content TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PUBLISHED',
+    visibility VARCHAR(20) NOT NULL DEFAULT 'PUBLIC',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    
+    PRIMARY KEY (id),
+    INDEX idx_posts_user_id (user_id),
+    INDEX idx_posts_created_at (created_at),
+    INDEX idx_posts_status_visibility (status, visibility),
+    CONSTRAINT fk_posts_users FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE TABLE post_attachments (
+    id BINARY(16) NOT NULL,
+    post_id BINARY(16) NOT NULL,
+    type VARCHAR(20) NOT NULL,
+    url VARCHAR(2048) NOT NULL,
+    width INT,
+    height INT,
+    size INT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    PRIMARY KEY (id),
+    INDEX idx_post_attachments_post_id (post_id),
+    CONSTRAINT fk_post_attachments_posts FOREIGN KEY (post_id) REFERENCES posts (id) ON DELETE CASCADE
+);
+```
+
+### コメント関連テーブル
+
+```sql
+CREATE TABLE comments (
+    id BINARY(16) NOT NULL,
+    post_id BINARY(16) NOT NULL,
+    user_id BINARY(16) NOT NULL,
+    parent_id BINARY(16),
+    content TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PUBLISHED',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    
+    PRIMARY KEY (id),
+    INDEX idx_comments_post_id (post_id),
+    INDEX idx_comments_user_id (user_id),
+    INDEX idx_comments_parent_id (parent_id),
+    INDEX idx_comments_created_at (created_at),
+    CONSTRAINT fk_comments_posts FOREIGN KEY (post_id) REFERENCES posts (id) ON DELETE CASCADE,
+    CONSTRAINT fk_comments_users FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT fk_comments_parents FOREIGN KEY (parent_id) REFERENCES comments (id) ON DELETE SET NULL
+);
+```
+
+## マイグレーション管理のベストプラクティス
+
+### 安全なデータベース変更
+
+1. **非破壊的変更を優先**
+   - カラムの削除より追加
+   - テーブルの変更より新テーブルの作成と段階的な移行
+
+2. **ダウンタイムの最小化**
+   - インデックス作成は `ALGORITHM=INPLACE, LOCK=NONE` オプションを使用
+   - 大規模なデータ操作は小さなバッチに分割
+
+3. **バックアップ**
+   - マイグレーション前に必ずバックアップを作成
+   - 本番環境ではロールバックプランを準備
+
+### バッチサイズの考慮
+
+大量のデータ移行や更新を行う場合は、一度に処理するレコード数を制限します：
+
+```sql
+-- 一度に1000件ずつ処理
+SET @batch_size = 1000;
+SET @rows_affected = 1;
+
+WHILE @rows_affected > 0 DO
+    UPDATE users
+    SET status = 'ACTIVE'
+    WHERE status = 'active'
+    LIMIT @batch_size;
+    
+    SET @rows_affected = ROW_COUNT();
+    SELECT SLEEP(0.1); -- サーバー負荷を分散
+END WHILE;
+```
+
+### マイグレーションのテスト
+
+1. **開発環境でのテスト**
+   - 各マイグレーションスクリプトを開発環境で実行し、問題ないことを確認
+   - マイグレーション適用後のアプリケーション動作を確認
+
+2. **統合テスト**
+   - CI/CD パイプラインでマイグレーションスクリプトを含めたテストを実行
+   - テストデータベースをクリーンな状態から構築し、全マイグレーションを適用
+
+3. **パフォーマンステスト**
+   - 大規模なデータ変更を含むマイグレーションの場合、実際のデータ量に近い環境でパフォーマンステストを実施
+
+## データベースの論理削除
+
+論理削除を実装する場合は以下のガイドラインに従います：
+
+1. **論理削除カラム**
+   - `deleted_at TIMESTAMP NULL DEFAULT NULL` カラムを使用
+   - NULL でない場合は論理削除済みとみなす
+
+2. **リポジトリ実装での考慮**
+   - 標準のクエリでは論理削除済みのレコードを除外
+   - 特定のケースでのみ論理削除済みレコードを含める専用メソッドを提供
+
+3. **物理削除の考慮**
+   - プライバシー規制（GDPR等）に基づく削除要求を考慮し、物理削除の仕組みも実装
+   - 長期間論理削除状態のデータの物理削除バッチ処理を検討
+
+## Flyway統合
+
+### Gradleタスク設定
+
+```kotlin
+// build.gradle.kts
+plugins {
+    id("org.flywaydb.flyway") version "9.8.1"
+}
+
+dependencies {
+    implementation("org.flywaydb:flyway-core:9.8.1")
+    implementation("org.flywaydb:flyway-mysql:9.8.1") // MySQLの場合
+}
+
+flyway {
+    url = System.getenv("DB_URL") ?: "jdbc:mysql://localhost:3306/app_db"
+    user = System.getenv("DB_USER") ?: "root"
+    password = System.getenv("DB_PASSWORD") ?: "password"
+    locations = arrayOf("filesystem:src/main/resources/db/migration")
+    validateOnMigrate = true
+    outOfOrder = false
+    baselineOnMigrate = true
+}
+
+tasks.register("flywayMigrateLocal") {
+    dependsOn("flywayMigrate")
+    doFirst {
+        // ローカル開発環境向けの追加設定
+        flyway {
+            url = "jdbc:mysql://localhost:3306/app_db"
+            user = "root"
+            password = "password"
+        }
+    }
+}
+```
+
+### Spring Boot統合
+
+```properties
+# application.properties
+spring.flyway.enabled=true
+spring.flyway.locations=classpath:db/migration
+spring.flyway.baseline-on-migrate=true
+spring.flyway.validate-on-migrate=true
+spring.flyway.out-of-order=false
+```
+
+### コマンドの使用方法
+
+```bash
+# マイグレーションの適用
+./gradlew flywayMigrate
+
+# マイグレーション情報の確認
+./gradlew flywayInfo
+
+# DBをクリーンアップしてマイグレーションを再適用
+./gradlew flywayClean flywayMigrate
+
+# ローカル環境用のカスタムタスク
+./gradlew flywayMigrateLocal
+```
+
+## データベース設計レビュー
+
+新しいテーブルを作成する際は、以下のチェックリストを確認してください：
+
+1. **命名規則の遵守**
+   - テーブル名、カラム名が規約に従っているか
+   - インデックス、制約の命名が規約に従っているか
+
+2. **適切なデータ型の選択**
+   - 各カラムに最適なデータ型を選択しているか
+   - 文字列の長さ制限が適切か
+
+3. **NULL制約の確認**
+   - 必須項目には NOT NULL 制約があるか
+   - NULL許容は必要な場合のみに限定されているか
+
+4. **インデックスの設計**
+   - 頻繁に検索されるカラムにインデックスを設定しているか
+   - 複合インデックスの順序は最適か
+
+5. **整合性制約**
+   - 外部キー制約が適切に設定されているか
+   - 一意性制約が必要な箇所に設定されているか
+
+6. **標準カラムの存在確認**
+   - 監査用のタイムスタンプ（created_at, updated_at）があるか
+   - 論理削除を実装する場合は deleted_at があるか 
