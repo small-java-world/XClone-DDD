@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: Apply testing best practices across backend and frontend
 globs: ["**/*test*", "**/*spec*"]
 tags: ["testing", "tdd", "e2e", "unit"]

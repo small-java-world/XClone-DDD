@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: Reactフロントエンドの開発ベストプラクティス
 globs: ["frontend/**/*.{tsx,jsx,ts,js}"]
 tags: ["frontend", "react", "typescript"]

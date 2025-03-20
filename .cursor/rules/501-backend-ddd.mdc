@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: バックエンドのドメイン駆動設計（DDD）プラクティス
 globs: ["backend/**/*.{kt,java}"]
 tags: ["backend", "domain", "ddd", "architecture"]
