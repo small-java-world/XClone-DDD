@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: Apply Kotlin and Spring Boot best practices for backend development
 globs: ["backend/**/*.kt"]
 tags: ["backend", "kotlin", "spring-boot"]
