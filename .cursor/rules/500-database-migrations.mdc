@@ -1,151 +1,358 @@
 ---
-description: Apply best practices for database management and Flyway migrations
-globs: ["backend/src/main/resources/db/migration/**", "**/*Repository*", "**/*Entity*"]
-tags: ["database", "flyway", "migration", "jooq"]
-priority: 4
+description: データベース管理とFlywayマイグレーションのベストプラクティス
+globs: ["backend/**/db/migration/**/*.sql", "backend/**/*.{kt,java}", "build.gradle", "gradle/**/*"]
+tags: ["database", "flyway", "migrations"]
+priority: 500
 version: 1.0.0
 ---
 
-# Database Management and Migrations
+# データベース管理とFlywayマイグレーションのベストプラクティス
 
-## Database Architecture
-- MySQL as the primary database
-- Redis for caching
-- jOOQ for type-safe SQL generation
-- Flyway for database migrations
+## データベースアーキテクチャ
+- MySQL 8.0を主要データベースとして使用
+- Redisをキャッシュ層として使用
+- jOOQによる型安全なSQLの生成
+- Flywayによるデータベースマイグレーション管理
 
-## Database Schema Design
-- Follow domain boundaries in schema design
-- Use UUID as primary keys for entities
-- Apply appropriate indexes for query optimization
-- Follow naming conventions for tables and columns
-- Implement proper foreign key constraints
+## スキーマ設計ガイドライン
 
-## Flyway Migration Strategy
-- Version migrations with timestamp prefix: `V{yyyy}{MM}{dd}{HH}{mm}{ss}__descriptive_name.sql`
-- One change per migration file
-- Migrations should be immutable once committed
-- Write backward compatible migrations where possible
-- Include comments to explain complex migration logic
+### 命名規則
+- テーブル名は複数形、小文字、単語間はアンダースコア区切り（例: `users`, `post_likes`）
+- カラム名は小文字、単語間はアンダースコア区切り（例: `user_id`, `created_at`）
+- インデックス名は`idx_[テーブル名]_[カラム名]`の形式（例: `idx_users_username`）
+- 外部キー制約名は`fk_[テーブル名]_[参照テーブル名]`の形式（例: `fk_posts_users`）
 
-### Example Flyway Migration
+### 主キー設計
+- すべてのテーブルには必ず主キーを定義する
+- 主キーには**タイムスタンプ最適化されたUUID**を使用する（詳細は後述）
+- 主キーカラム名は`id`とする
+- 外部キーカラム名は`[参照テーブル名（単数形）]_id`とする（例: `user_id`）
+
+### UUID最適化
+- UUIDの標準形式では時系列でのインデックス効率が悪いため、タイムスタンプビットをスワップした最適化UUIDを使用する
+- バイナリ形式で保存し、アプリケーション層でUUID⇔バイナリ変換を処理する
+
+```kotlin
+// UUIDのタイムスタンプ最適化ユーティリティ
+object TimeBasedUUID {
+    // 新しいタイムスタンプベースのUUIDを生成
+    fun generate(): UUID {
+        val timestamp = System.currentTimeMillis()
+        val randomBytes = ByteArray(10)
+        ThreadLocalRandom.current().nextBytes(randomBytes)
+        
+        val buffer = ByteBuffer.wrap(ByteArray(16))
+        // 最初の6バイトにタイムスタンプを設定（ビッグエンディアン）
+        buffer.putLong(0, timestamp).position(6)
+        // 残りの10バイトにランダム値を設定
+        buffer.put(randomBytes)
+        buffer.flip()
+        
+        val high = buffer.getLong()
+        val low = buffer.getLong()
+        return UUID(high, low)
+    }
+    
+    // UUIDからMySQLのBINARY(16)形式に変換
+    fun toBytes(uuid: UUID): ByteArray {
+        val buffer = ByteBuffer.wrap(ByteArray(16))
+        buffer.putLong(uuid.mostSignificantBits)
+        buffer.putLong(uuid.leastSignificantBits)
+        return buffer.array()
+    }
+    
+    // MySQL BINARY(16)形式からUUIDに変換
+    fun fromBytes(bytes: ByteArray): UUID {
+        val buffer = ByteBuffer.wrap(bytes)
+        val high = buffer.getLong()
+        val low = buffer.getLong()
+        return UUID(high, low)
+    }
+    
+    // UUIDからタイムスタンプを抽出
+    fun extractTimestamp(uuid: UUID): Long {
+        val buffer = ByteBuffer.allocate(8)
+        buffer.putLong(0, uuid.mostSignificantBits)
+        // 上位6バイトがタイムスタンプ
+        return buffer.getLong(0) >>> 16
+    }
+}
+```
+
+### データベースカラム型
+
+- UUID主キー: `BINARY(16)` - バイナリ形式で保存し、インデックス効率を向上
+- 文字列: 適切な長さの `VARCHAR` を使用（デフォルトで `utf8mb4` エンコーディング）
+- テキスト: 長文には `TEXT` 型を使用
+- 日時: `TIMESTAMP` または `DATETIME` を使用
+- Boolean: `TINYINT(1)` を使用
+- 数値: 適切な型（`INT`, `BIGINT`, `DECIMAL` など）を使用
+- JSON: MySQL 8.0 の `JSON` 型を活用（必要な場合のみ）
+
+### 共通カラム
+
+以下のカラムをすべてのテーブルに含める：
+
+- `id BINARY(16) NOT NULL` - 主キー
+- `created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP` - 作成日時
+- `updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` - 更新日時
+
+必要に応じて以下も追加：
+
+- `deleted_at TIMESTAMP NULL DEFAULT NULL` - 論理削除用（NULL以外の場合は削除扱い）
+
+## Flywayマイグレーション戦略
+
+### マイグレーションファイル命名規則
+
+フォーマット: `V{yyyy}{MM}{dd}{HH}{mm}{ss}__descriptive_name.sql`
+
+例:
+- `V20250320120000__create_users_table.sql`
+- `V20250320120100__create_posts_table.sql`
+- `V20250320120200__add_index_to_users_username.sql`
+
+### マイグレーションファイル作成ルール
+
+1. 1つのマイグレーションファイルには1つの論理的な変更のみを含める
+2. マイグレーションは不変（immutable）であり、一度コミットしたファイルは変更しない
+3. 各マイグレーションファイルの先頭にはコメントでその内容を説明する
+4. テーブル作成時は必ず主キー、インデックス、外部キー制約を適切に設定する
+5. 大きなスキーマ変更は複数のマイグレーションファイルに分割する
+
+### マイグレーション例
 
 ```sql
--- V20250320130000__create_users_table.sql
--- Create the users table
+-- V20250320120000__create_users_table.sql
+-- ユーザーテーブルの作成
 
 CREATE TABLE users (
-    id VARCHAR(36) NOT NULL,
+    id BINARY(16) NOT NULL,
     username VARCHAR(50) NOT NULL,
     display_name VARCHAR(100) NOT NULL,
     email VARCHAR(255) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     bio TEXT,
     profile_image_url VARCHAR(255),
+    account_status ENUM('ACTIVE', 'SUSPENDED', 'DEACTIVATED', 'BANNED') NOT NULL DEFAULT 'ACTIVE',
+    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE INDEX idx_username (username),
-    UNIQUE INDEX idx_email (email)
+    UNIQUE INDEX idx_users_username (username),
+    UNIQUE INDEX idx_users_email (email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
 ```sql
--- V20250320130100__create_posts_table.sql
--- Create the posts table
+-- V20250320120100__create_posts_table.sql
+-- 投稿テーブルの作成
 
 CREATE TABLE posts (
-    id VARCHAR(36) NOT NULL,
-    user_id VARCHAR(36) NOT NULL,
+    id BINARY(16) NOT NULL,
+    user_id BINARY(16) NOT NULL,
     content TEXT NOT NULL,
-    media_url VARCHAR(255),
+    is_retweet BOOLEAN NOT NULL DEFAULT FALSE,
+    retweeted_post_id BINARY(16),
+    reply_to_id BINARY(16),
+    quoted_post_id BINARY(16),
+    likes_count INT NOT NULL DEFAULT 0,
+    retweets_count INT NOT NULL DEFAULT 0,
+    replies_count INT NOT NULL DEFAULT 0,
+    visibility ENUM('PUBLIC', 'FOLLOWERS', 'MENTIONED', 'PRIVATE') NOT NULL DEFAULT 'PUBLIC',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    INDEX idx_user_id (user_id),
-    INDEX idx_created_at (created_at),
-    CONSTRAINT fk_posts_user_id FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    INDEX idx_posts_user_id (user_id),
+    INDEX idx_posts_reply_to_id (reply_to_id),
+    INDEX idx_posts_created_at (created_at),
+    CONSTRAINT fk_posts_user_id FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT fk_posts_retweeted_post_id FOREIGN KEY (retweeted_post_id) REFERENCES posts (id) ON DELETE SET NULL,
+    CONSTRAINT fk_posts_reply_to_id FOREIGN KEY (reply_to_id) REFERENCES posts (id) ON DELETE SET NULL,
+    CONSTRAINT fk_posts_quoted_post_id FOREIGN KEY (quoted_post_id) REFERENCES posts (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-## jOOQ Integration
-- Generate jOOQ classes from the database schema
-- Use jOOQ for type-safe SQL queries
-- Leverage jOOQ for complex query construction
-- Use jOOQ data classes for database operations
+## jOOQ連携
 
-### Example Repository Implementation with jOOQ
+### jOOQコード生成
+
+jOOQを使用して、データベーススキーマからKotlinのクラスを自動生成します。
+
+```groovy
+// build.gradle
+jooq {
+    version = '3.17.7'
+    edition = JooqEdition.OSS
+    
+    configurations {
+        main {
+            generateSchemaSourceOnCompilation = true
+            
+            generationTool {
+                jdbc {
+                    driver = 'com.mysql.cj.jdbc.Driver'
+                    url = 'jdbc:mysql://localhost:3306/xclone'
+                    user = 'root'
+                    password = 'password'
+                }
+                generator {
+                    name = 'org.jooq.codegen.KotlinGenerator'
+                    database {
+                        name = 'org.jooq.meta.mysql.MySQLDatabase'
+                        includes = '.*'
+                        excludes = 'flyway_schema_history'
+                    }
+                    target {
+                        packageName = 'com.example.xclone.infrastructure.jooq'
+                        directory = 'build/generated-src/jooq/main'
+                    }
+                    strategy.name = 'org.jooq.codegen.DefaultGeneratorStrategy'
+                }
+            }
+        }
+    }
+}
+```
+
+### リポジトリでのjOOQ活用例
 
 ```kotlin
 @Repository
-class JooqUserRepository(private val dsl: DSLContext) : UserRepository {
+class JooqPostRepository(private val dsl: DSLContext) : PostRepository {
     
-    override fun findById(id: UUID): User? {
-        return dsl.selectFrom(USERS)
-            .where(USERS.ID.eq(id.toString()))
-            .fetchOneInto(UserRecord::class.java)
+    override fun findById(id: UUID): Post? {
+        return dsl.selectFrom(POSTS)
+            .where(POSTS.ID.eq(TimeBasedUUID.toBytes(id)))
+            .fetchOneInto(PostRecord::class.java)
             ?.toDomain()
     }
     
-    override fun findByUsername(username: String): User? {
-        return dsl.selectFrom(USERS)
-            .where(USERS.USERNAME.eq(username))
-            .fetchOneInto(UserRecord::class.java)
-            ?.toDomain()
+    override fun findByUserId(userId: UUID, pageable: Pageable): Page<Post> {
+        val userIdBytes = TimeBasedUUID.toBytes(userId)
+        
+        val total = dsl.selectCount()
+            .from(POSTS)
+            .where(POSTS.USER_ID.eq(userIdBytes))
+            .fetchOne(0, Long::class.java) ?: 0L
+            
+        val records = dsl.selectFrom(POSTS)
+            .where(POSTS.USER_ID.eq(userIdBytes))
+            .orderBy(POSTS.CREATED_AT.desc())
+            .limit(pageable.pageSize)
+            .offset(pageable.offset)
+            .fetchInto(PostRecord::class.java)
+            
+        val posts = records.map { it.toDomain() }
+        
+        return PageImpl(posts, pageable, total)
     }
     
-    override fun save(user: User): User {
-        val record = UserRecord().apply {
-            id = user.id.toString()
-            username = user.username
-            displayName = user.displayName
-            email = user.email
-            passwordHash = user.passwordHash
-            bio = user.bio
-            profileImageUrl = user.profileImageUrl
-            createdAt = user.createdAt
-            updatedAt = user.updatedAt
+    override fun save(post: Post): Post {
+        val record = PostRecord().apply {
+            id = TimeBasedUUID.toBytes(post.id)
+            userId = TimeBasedUUID.toBytes(post.userId)
+            content = post.content.text
+            isRetweet = post.isRetweet
+            retweetedPostId = post.retweetedPostId?.let { TimeBasedUUID.toBytes(it) }
+            replyToId = post.replyToId?.let { TimeBasedUUID.toBytes(it) }
+            quotedPostId = post.quotedPostId?.let { TimeBasedUUID.toBytes(it) }
+            likesCount = post.likesCount
+            retweetsCount = post.retweetsCount
+            repliesCount = post.repliesCount
+            visibility = post.visibility.name
+            createdAt = post.createdAt
+            updatedAt = post.updatedAt
         }
         
-        dsl.insertInto(USERS)
+        dsl.insertInto(POSTS)
             .set(record)
             .onDuplicateKeyUpdate()
             .set(record)
             .execute()
             
-        return user
+        return post
     }
     
-    private fun UserRecord.toDomain(): User {
-        return User(
-            id = UUID.fromString(id),
-            username = username,
-            displayName = displayName,
-            email = email,
-            passwordHash = passwordHash,
-            bio = bio,
-            profileImageUrl = profileImageUrl,
-            createdAt = createdAt,
-            updatedAt = updatedAt
-        )
+    private fun PostRecord.toDomain(): Post {
+        // レコードからドメインオブジェクトへの変換ロジック
+        // Binaryカラムを適切にUUIDに変換
+        val postId = TimeBasedUUID.fromBytes(id)
+        val postUserId = TimeBasedUUID.fromBytes(userId)
+        // ... その他の変換ロジック
     }
 }
 ```
 
-## Redis Caching Strategy
-- Cache frequently accessed data
-- Use appropriate TTL (Time-To-Live) for cache entries
-- Implement cache invalidation on data updates
-- Use Redis for session storage and distributed locks
+## マイグレーション実行
 
-## Migration Testing
-- Test migrations in CI/CD pipeline
-- Use test containers for integration testing
-- Verify migrations work with production-like data
-- Include rollback tests for critical migrations
+### Gradle Flywayタスク
 
-## Performance Considerations
-- Create appropriate indexes for common queries
-- Monitor query performance and optimize slow queries
-- Use database connection pooling
-- Consider partitioning for large tables 
+```groovy
+// build.gradle
+flyway {
+    url = 'jdbc:mysql://localhost:3306/xclone'
+    user = 'root'
+    password = 'password'
+    baselineOnMigrate = true
+    baselineVersion = '0'
+    locations = ['classpath:db/migration']
+    encoding = 'UTF-8'
+}
+```
+
+### よく使うFlywayコマンド
+
+- `./gradlew flywayMigrate` - マイグレーションを実行
+- `./gradlew flywayInfo` - マイグレーション状態を確認
+- `./gradlew flywayValidate` - マイグレーションファイルの検証
+- `./gradlew flywayClean` - データベースをクリーン（開発環境のみ）
+- `./gradlew flywayRepair` - 失敗したマイグレーションを修復
+
+## マイグレーションのテスト
+
+- マイグレーションはCI/CDパイプラインの一部としてテストする
+- TestContainersを使用して、実際のデータベースに対してマイグレーションをテスト
+- マイグレーション後に基本的なクエリが動作することを確認
+
+```kotlin
+@SpringBootTest
+@Testcontainers
+class MigrationTest {
+    
+    @Container
+    val mysqlContainer = MySQLContainer<Nothing>("mysql:8.0")
+        .apply {
+            withDatabaseName("testdb")
+            withUsername("test")
+            withPassword("test")
+        }
+    
+    @Autowired
+    lateinit var flyway: Flyway
+    
+    @Autowired
+    lateinit var jdbcTemplate: JdbcTemplate
+    
+    @Test
+    fun `should migrate database successfully`() {
+        // Flywayが正常に動作したことを確認
+        val migrations = flyway.info().applied()
+        assertThat(migrations).isNotEmpty()
+        
+        // 基本的なクエリが動作することを確認
+        val tables = jdbcTemplate.queryForList("SHOW TABLES")
+        assertThat(tables).isNotEmpty()
+        assertThat(tables.map { it.values.first() })
+            .contains("users", "posts", "follows")
+    }
+}
+```
+
+## パフォーマンス考慮事項
+
+1. 適切なインデックスを作成し、頻繁なクエリを最適化する
+2. 大規模なスキーマ変更は計画的に実施し、サービス停止時間を最小限に抑える
+3. `EXPLAIN` を使用してクエリプランを分析し、ボトルネックを特定する
+4. 必要に応じてパーティショニングを導入して大きなテーブルを管理する
+5. UUIDの時系列最適化によりインデックスの効率を向上させる 

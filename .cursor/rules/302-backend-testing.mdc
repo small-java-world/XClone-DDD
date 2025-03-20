@@ -1,0 +1,149 @@
+---
+description: バックエンドのテストのベストプラクティス
+globs: ["backend/**/*.{test,spec,Test}.{kt,java}"]
+tags: ["testing", "backend", "quality"]
+priority: 302
+version: 1.0.0
+---
+
+# バックエンドのテストのベストプラクティス
+
+## テスト層の構造
+- 各テストは以下のレベルの1つに分類する：
+  - 単体テスト：個々のクラスやメソッドを分離してテスト
+  - インテグレーションテスト：複数のコンポーネントの連携をテスト
+  - E2Eテスト：エンドツーエンドでシステム全体をテスト
+
+## テストディレクトリ構造
+```
+backend/src/
+├── main/
+│   └── kotlin/
+│       └── com/example/xclone/
+│           ├── domain/
+│           │   ├── user/
+│           │   └── post/
+│           └── ... 
+└── test/
+    └── kotlin/
+        └── com/example/xclone/
+            ├── domain/
+            │   ├── user/     # ユーザードメインのテスト
+            │   └── post/     # 投稿ドメインのテスト
+            ├── application/  # アプリケーションサービスのテスト
+            ├── interfaces/   # コントローラーのテスト
+            └── integration/  # インテグレーションテスト
+```
+
+## 単体テスト
+- 各クラスに対応するテストクラスを作成する
+- テストクラスの命名規則は`[クラス名]Test`とする
+- 依存関係はモックまたはスタブを使用して分離する
+- テストメソッド名は`should[期待する動作]When[条件]`というパターンで命名する
+- JUnitとKotlinのテスト機能を活用する
+
+```kotlin
+// 良いテスト例
+@Test
+fun shouldCreateUserWhenValidData() {
+    // Arrange
+    val validUserData = UserRegistrationRequest(
+        username = "testuser",
+        email = "test@example.com",
+        password = "securePassword123"
+    )
+    
+    // Act
+    val result = userService.registerUser(validUserData)
+    
+    // Assert
+    assertThat(result.username).isEqualTo(validUserData.username)
+    assertThat(result.email).isEqualTo(validUserData.email)
+    verify(userRepository).save(any())
+}
+```
+
+## モックフレームワーク
+- Mockitoと必要に応じてMockKを使用する
+- モックはテストごとにリセットする
+- 適切なときはスパイの使用を検討する
+- 必要最小限のモックにとどめ、過度なモックは避ける
+
+## ドメインテスト
+- ドメインロジックは純粋な単体テストでカバーする
+- 境界値、エッジケース、不正な入力を含む網羅的なテストケースを用意する
+- ドメインイベントが正しく発行されるかテストする
+- ドメインルールの違反時に正しい例外が投げられるかテストする
+
+## インテグレーションテスト
+- 実際のデータベースに接続するテストコンテナを使用する
+- Spring Bootのテスト機能を活用する（@DataJpaTest, @SpringBootTest）
+- インテグレーションテストでは実際のコンポーネント間の連携をテストする
+- テスト用データは各テストメソッドで独立して管理し、テスト間の依存関係を避ける
+
+## APIテスト
+- WebMvcTestを使用してコントローラーをテストする
+- リクエスト/レスポンスのシリアライズ/デシリアライズも含めてテストする
+- 正常系と異常系の両方をテストする
+- SpringのMockMvcでエンドポイントをテストする
+
+```kotlin
+@WebMvcTest(PostController::class)
+class PostControllerTest {
+    @Autowired
+    private lateinit var mockMvc: MockMvc
+    
+    @MockBean
+    private lateinit var postService: PostService
+    
+    @Test
+    fun shouldReturnCreatedWhenValidPost() {
+        // Arrange
+        val postRequest = PostCreateRequest("テスト投稿です")
+        val createdPost = Post(
+            id = UUID.randomUUID(),
+            userId = UUID.randomUUID(),
+            content = "テスト投稿です",
+            createdAt = LocalDateTime.now()
+        )
+        
+        given(postService.createPost(any(), any())).willReturn(createdPost)
+        
+        // Act & Assert
+        mockMvc.perform(post("/api/posts")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(postRequest))
+                .header("Authorization", "Bearer valid-token"))
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.content").value(postRequest.content))
+    }
+}
+```
+
+## データベーステスト
+- データベース関連のテストはTestContainersを使用して分離された環境で実行する
+- jOOQやリポジトリを使用したデータアクセス層のテストを実装する
+- データベーススキーマの変更がテストでカバーされていることを確認する
+- インデックスや制約の追加・削除もテストでカバーする
+
+## 並行テスト
+- テストは並行実行しても問題ないように設計する
+- 共有リソースへのアクセスには注意し、テスト間で分離する
+- グローバル状態に依存するテストは避ける
+
+## テストデータ
+- テストデータは直感的に理解できるように命名する
+- テスト対象の機能に関連するデータのみを作成する
+- テストデータファクトリを作成して再利用性を高める
+- データベースのシード処理を自動化する
+
+## カバレッジ
+- Jacoco等のツールを使用してテストカバレッジを測定する
+- ビジネスロジックを含むコア機能は高いカバレッジ（80%以上）を目指す
+- カバレッジレポートをCI/CDパイプラインに統合する
+- カバレッジ目標は達成しているかを自動的に検証する
+
+## パフォーマンステスト
+- 重要なAPIエンドポイントに対してパフォーマンステストを実施する
+- JMeterまたはGatlingを使用して負荷テストを実行する
+- デプロイ前にパフォーマンステストを実行し、パフォーマンス回帰を検出する 

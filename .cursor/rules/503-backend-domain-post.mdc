@@ -1,0 +1,557 @@
+---
+description: 投稿ドメインの実装ガイドライン
+globs: ["backend/**/domain/post/**/*.{kt,java}"]
+tags: ["domain", "post", "backend", "ddd"]
+priority: 503
+version: 1.0.0
+---
+
+# 投稿ドメイン実装ガイドライン
+
+## ドメイン概要
+
+投稿ドメインはXクローンアプリケーションの中心的な機能を担当し、テキスト投稿、メディア投稿、リプライ、リツイート、いいねなどの機能を提供します。
+
+## 主要な概念
+
+- **投稿**: ユーザーが作成するテキストとメディアの組み合わせ
+- **リプライ**: 他の投稿に対する返信
+- **リツイート**: 他のユーザーの投稿の再共有
+- **いいね**: 投稿に対する肯定的なフィードバック
+- **引用リツイート**: コメント付きの再共有
+
+## ドメインモデル
+
+### Post エンティティ
+
+投稿ドメインの集約ルートです。
+
+```kotlin
+package com.example.xclone.domain.post.model
+
+import com.example.xclone.domain.common.TimeBasedUUID
+import java.time.LocalDateTime
+import java.util.UUID
+
+data class Post private constructor(
+    val id: UUID,
+    val userId: UUID,
+    val content: PostContent,
+    val mediaIds: List<UUID>,
+    val replyToId: UUID?,
+    val quotedPostId: UUID?,
+    val isRetweet: Boolean,
+    val retweetedPostId: UUID?,
+    val likesCount: Int,
+    val retweetsCount: Int,
+    val repliesCount: Int,
+    val visibility: PostVisibility,
+    val createdAt: LocalDateTime,
+    val updatedAt: LocalDateTime
+) {
+    companion object {
+        // 通常の投稿作成
+        fun create(
+            userId: UUID,
+            content: PostContent,
+            mediaIds: List<UUID> = emptyList()
+        ): Post {
+            val now = LocalDateTime.now()
+            return Post(
+                id = TimeBasedUUID.generate(),
+                userId = userId,
+                content = content,
+                mediaIds = mediaIds,
+                replyToId = null,
+                quotedPostId = null,
+                isRetweet = false,
+                retweetedPostId = null,
+                likesCount = 0,
+                retweetsCount = 0,
+                repliesCount = 0,
+                visibility = PostVisibility.PUBLIC,
+                createdAt = now,
+                updatedAt = now
+            )
+        }
+        
+        // リプライの作成
+        fun createReply(
+            userId: UUID,
+            content: PostContent,
+            replyToId: UUID,
+            mediaIds: List<UUID> = emptyList()
+        ): Post {
+            val now = LocalDateTime.now()
+            return Post(
+                id = TimeBasedUUID.generate(),
+                userId = userId,
+                content = content,
+                mediaIds = mediaIds,
+                replyToId = replyToId,
+                quotedPostId = null,
+                isRetweet = false,
+                retweetedPostId = null,
+                likesCount = 0,
+                retweetsCount = 0,
+                repliesCount = 0,
+                visibility = PostVisibility.PUBLIC,
+                createdAt = now,
+                updatedAt = now
+            )
+        }
+        
+        // 引用リツイートの作成
+        fun createQuote(
+            userId: UUID,
+            content: PostContent,
+            quotedPostId: UUID,
+            mediaIds: List<UUID> = emptyList()
+        ): Post {
+            val now = LocalDateTime.now()
+            return Post(
+                id = TimeBasedUUID.generate(),
+                userId = userId,
+                content = content,
+                mediaIds = mediaIds,
+                replyToId = null,
+                quotedPostId = quotedPostId,
+                isRetweet = false,
+                retweetedPostId = null,
+                likesCount = 0,
+                retweetsCount = 0,
+                repliesCount = 0,
+                visibility = PostVisibility.PUBLIC,
+                createdAt = now,
+                updatedAt = now
+            )
+        }
+        
+        // リツイートの作成
+        fun createRetweet(
+            userId: UUID,
+            retweetedPostId: UUID
+        ): Post {
+            val now = LocalDateTime.now()
+            return Post(
+                id = TimeBasedUUID.generate(),
+                userId = userId,
+                content = PostContent.empty(),
+                mediaIds = emptyList(),
+                replyToId = null,
+                quotedPostId = null,
+                isRetweet = true,
+                retweetedPostId = retweetedPostId,
+                likesCount = 0,
+                retweetsCount = 0,
+                repliesCount = 0,
+                visibility = PostVisibility.PUBLIC,
+                createdAt = now,
+                updatedAt = now
+            )
+        }
+    }
+    
+    // いいねカウントのインクリメント
+    fun incrementLikesCount(): Post {
+        return this.copy(
+            likesCount = likesCount + 1,
+            updatedAt = LocalDateTime.now()
+        )
+    }
+    
+    // いいねカウントのデクリメント
+    fun decrementLikesCount(): Post {
+        return this.copy(
+            likesCount = (likesCount - 1).coerceAtLeast(0),
+            updatedAt = LocalDateTime.now()
+        )
+    }
+    
+    // リツイートカウントのインクリメント
+    fun incrementRetweetsCount(): Post {
+        return this.copy(
+            retweetsCount = retweetsCount + 1,
+            updatedAt = LocalDateTime.now()
+        )
+    }
+    
+    // リツイートカウントのデクリメント
+    fun decrementRetweetsCount(): Post {
+        return this.copy(
+            retweetsCount = (retweetsCount - 1).coerceAtLeast(0),
+            updatedAt = LocalDateTime.now()
+        )
+    }
+    
+    // リプライカウントのインクリメント
+    fun incrementRepliesCount(): Post {
+        return this.copy(
+            repliesCount = repliesCount + 1,
+            updatedAt = LocalDateTime.now()
+        )
+    }
+    
+    // 投稿の可視性変更
+    fun changeVisibility(visibility: PostVisibility): Post {
+        return this.copy(
+            visibility = visibility,
+            updatedAt = LocalDateTime.now()
+        )
+    }
+    
+    // リプライかどうか
+    fun isReply(): Boolean = replyToId != null
+    
+    // 引用リツイートかどうか
+    fun isQuote(): Boolean = quotedPostId != null
+    
+    // 公開投稿かどうか
+    fun isPublic(): Boolean = visibility == PostVisibility.PUBLIC
+}
+```
+
+### 値オブジェクト
+
+```kotlin
+// 投稿内容の値オブジェクト
+data class PostContent private constructor(
+    val text: String,
+    val hashtags: List<String>,
+    val mentions: List<String>
+) {
+    companion object {
+        private const val MAX_LENGTH = 280
+        
+        fun of(text: String): PostContent {
+            require(text.isNotBlank()) { "投稿内容は空にできません" }
+            require(text.length <= MAX_LENGTH) { "投稿内容は${MAX_LENGTH}文字以内にする必要があります" }
+            
+            // ハッシュタグの抽出
+            val hashtagPattern = "#([A-Za-z0-9_]+)".toRegex()
+            val hashtags = hashtagPattern.findAll(text)
+                .map { it.groupValues[1] }
+                .toList()
+            
+            // メンションの抽出
+            val mentionPattern = "@([A-Za-z0-9_]+)".toRegex()
+            val mentions = mentionPattern.findAll(text)
+                .map { it.groupValues[1] }
+                .toList()
+            
+            return PostContent(text, hashtags, mentions)
+        }
+        
+        fun empty(): PostContent {
+            // リツイート用の空コンテンツ
+            return PostContent("", emptyList(), emptyList())
+        }
+    }
+    
+    fun hasHashtag(hashtag: String): Boolean = hashtags.contains(hashtag)
+    
+    fun hasMention(username: String): Boolean = mentions.contains(username)
+    
+    override fun toString(): String = text
+}
+
+// 投稿の可視性
+enum class PostVisibility {
+    PUBLIC,      // 公開
+    FOLLOWERS,   // フォロワーのみ
+    MENTIONED,   // メンションされたユーザーのみ
+    PRIVATE      // 自分のみ
+}
+
+// メディアタイプ
+enum class MediaType {
+    IMAGE,
+    VIDEO,
+    GIF
+}
+
+// 投稿メディア
+data class PostMedia(
+    val id: UUID,
+    val postId: UUID,
+    val url: String,
+    val type: MediaType,
+    val width: Int,
+    val height: Int,
+    val altText: String?
+)
+```
+
+## リポジトリ
+
+```kotlin
+package com.example.xclone.domain.post.repository
+
+import com.example.xclone.domain.post.model.Post
+import java.util.UUID
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
+
+interface PostRepository {
+    fun findById(id: UUID): Post?
+    fun findByUserId(userId: UUID, pageable: Pageable): Page<Post>
+    fun findReplies(postId: UUID, pageable: Pageable): Page<Post>
+    fun findByHashtag(hashtag: String, pageable: Pageable): Page<Post>
+    fun searchByContent(query: String, pageable: Pageable): Page<Post>
+    fun save(post: Post): Post
+    fun delete(post: Post)
+}
+
+interface PostLikeRepository {
+    fun findByPostIdAndUserId(postId: UUID, userId: UUID): PostLike?
+    fun existsByPostIdAndUserId(postId: UUID, userId: UUID): Boolean
+    fun save(postLike: PostLike): PostLike
+    fun delete(postLike: PostLike)
+}
+
+interface PostMediaRepository {
+    fun findByPostId(postId: UUID): List<PostMedia>
+    fun save(postMedia: PostMedia): PostMedia
+    fun saveAll(mediaList: List<PostMedia>): List<PostMedia>
+    fun deleteByPostId(postId: UUID)
+}
+```
+
+## ドメインサービス
+
+```kotlin
+package com.example.xclone.domain.post.service
+
+import com.example.xclone.domain.post.model.Post
+import com.example.xclone.domain.post.model.PostLike
+import com.example.xclone.domain.post.repository.PostRepository
+import com.example.xclone.domain.post.repository.PostLikeRepository
+import java.util.UUID
+import java.time.LocalDateTime
+
+class PostService(
+    private val postRepository: PostRepository,
+    private val postLikeRepository: PostLikeRepository
+) {
+    /**
+     * 投稿にいいねをする
+     */
+    fun likePost(postId: UUID, userId: UUID): PostLike {
+        // 投稿の存在確認
+        val post = postRepository.findById(postId)
+            ?: throw PostNotFoundException("投稿が見つかりません: $postId")
+        
+        // 既にいいね済みかチェック
+        if (postLikeRepository.existsByPostIdAndUserId(postId, userId)) {
+            throw PostAlreadyLikedException("この投稿は既にいいね済みです")
+        }
+        
+        // いいねを作成
+        val postLike = PostLike(
+            id = TimeBasedUUID.generate(),
+            postId = postId,
+            userId = userId,
+            createdAt = LocalDateTime.now()
+        )
+        
+        // いいねカウントを更新
+        postRepository.save(post.incrementLikesCount())
+        
+        return postLikeRepository.save(postLike)
+    }
+    
+    /**
+     * 投稿のいいねを取り消す
+     */
+    fun unlikePost(postId: UUID, userId: UUID) {
+        // 投稿の存在確認
+        val post = postRepository.findById(postId)
+            ?: throw PostNotFoundException("投稿が見つかりません: $postId")
+        
+        // いいねの存在確認
+        val postLike = postLikeRepository.findByPostIdAndUserId(postId, userId)
+            ?: throw PostLikeNotFoundException("いいねが見つかりません")
+        
+        // いいねを削除
+        postLikeRepository.delete(postLike)
+        
+        // いいねカウントを更新
+        postRepository.save(post.decrementLikesCount())
+    }
+    
+    /**
+     * ハッシュタグで投稿を検索
+     */
+    fun findPostsByHashtag(hashtag: String, page: Int, size: Int): Page<Post> {
+        val pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))
+        return postRepository.findByHashtag(hashtag, pageable)
+    }
+}
+```
+
+## ドメインイベント
+
+```kotlin
+package com.example.xclone.domain.post.event
+
+sealed class PostEvent {
+    data class PostCreated(
+        val postId: UUID,
+        val userId: UUID,
+        val content: String,
+        val isReply: Boolean,
+        val replyToId: UUID?,
+        val createdAt: LocalDateTime
+    ) : PostEvent()
+    
+    data class PostLiked(
+        val postId: UUID,
+        val userId: UUID,
+        val likedAt: LocalDateTime
+    ) : PostEvent()
+    
+    data class PostRetweeted(
+        val postId: UUID,
+        val retweetId: UUID,
+        val userId: UUID,
+        val retweetedAt: LocalDateTime
+    ) : PostEvent()
+    
+    data class PostDeleted(
+        val postId: UUID,
+        val userId: UUID,
+        val deletedAt: LocalDateTime
+    ) : PostEvent()
+}
+```
+
+## 例外
+
+```kotlin
+package com.example.xclone.domain.post.exception
+
+sealed class PostException(message: String) : RuntimeException(message)
+
+class PostNotFoundException(message: String) : PostException(message)
+class PostLikeNotFoundException(message: String) : PostException(message)
+class PostAlreadyLikedException(message: String) : PostException(message)
+class InvalidPostContentException(message: String) : PostException(message)
+class PostDeletionForbiddenException(message: String) : PostException(message)
+```
+
+## ユースケース例
+
+### 投稿作成
+
+```kotlin
+// アプリケーション層のユースケース
+class CreatePostUseCase(
+    private val postRepository: PostRepository,
+    private val postMediaRepository: PostMediaRepository,
+    private val eventPublisher: ApplicationEventPublisher,
+    private val mediaService: MediaService
+) {
+    fun execute(request: CreatePostRequest, userId: UUID): Post {
+        // 投稿内容の作成
+        val content = PostContent.of(request.content)
+        
+        // メディアの処理
+        val mediaIds = request.mediaFiles?.let { files ->
+            files.map { file ->
+                val mediaUrl = mediaService.uploadMedia(file, userId)
+                val media = PostMedia(
+                    id = TimeBasedUUID.generate(),
+                    postId = UUID.randomUUID(), // 仮のID（後で更新）
+                    url = mediaUrl,
+                    type = determineMediaType(file),
+                    width = getMediaWidth(file),
+                    height = getMediaHeight(file),
+                    altText = request.altTexts?.get(files.indexOf(file))
+                )
+                media.id
+            }
+        } ?: emptyList()
+        
+        // 投稿の作成
+        val post = Post.create(
+            userId = userId,
+            content = content,
+            mediaIds = mediaIds
+        )
+        
+        // 保存
+        val savedPost = postRepository.save(post)
+        
+        // メディアの投稿IDを更新して保存
+        if (mediaIds.isNotEmpty()) {
+            val mediaList = mediaIds.mapIndexed { index, mediaId ->
+                PostMedia(
+                    id = mediaId,
+                    postId = savedPost.id,
+                    url = request.mediaFiles!![index].let { mediaService.getMediaUrl(it, userId) },
+                    type = determineMediaType(request.mediaFiles[index]),
+                    width = getMediaWidth(request.mediaFiles[index]),
+                    height = getMediaHeight(request.mediaFiles[index]),
+                    altText = request.altTexts?.get(index)
+                )
+            }
+            postMediaRepository.saveAll(mediaList)
+        }
+        
+        // イベント発行
+        eventPublisher.publishEvent(
+            PostEvent.PostCreated(
+                postId = savedPost.id,
+                userId = userId,
+                content = content.text,
+                isReply = false,
+                replyToId = null,
+                createdAt = savedPost.createdAt
+            )
+        )
+        
+        return savedPost
+    }
+    
+    private fun determineMediaType(file: MultipartFile): MediaType {
+        return when {
+            file.contentType?.startsWith("image/gif") == true -> MediaType.GIF
+            file.contentType?.startsWith("image/") == true -> MediaType.IMAGE
+            file.contentType?.startsWith("video/") == true -> MediaType.VIDEO
+            else -> throw InvalidMediaTypeException("不明なメディアタイプです: ${file.contentType}")
+        }
+    }
+    
+    private fun getMediaWidth(file: MultipartFile): Int {
+        // 画像/動画の幅を取得するロジック
+        return 0 // 実装省略
+    }
+    
+    private fun getMediaHeight(file: MultipartFile): Int {
+        // 画像/動画の高さを取得するロジック
+        return 0 // 実装省略
+    }
+}
+```
+
+## 検証ルール
+
+1. 投稿内容は280文字以内
+2. 投稿は少なくとも1文字以上のテキスト、または1つ以上のメディアを含む必要がある
+3. メディアは最大4つまで添付可能
+4. リツイートできるのは他のユーザーの投稿のみ（自分の投稿はリツイート不可）
+5. 削除された投稿へのリプライやリツイートはできない
+
+## セキュリティ考慮事項
+
+1. プライベート投稿は権限のあるユーザーのみが閲覧可能
+2. 投稿の削除は投稿者本人のみが可能
+3. 削除された投稿のコンテンツは完全に削除し、参照も不可能にする
+4. メディアファイルのアップロードはファイルタイプとサイズを検証
+
+## パフォーマンス考慮事項
+
+1. 人気のある投稿はキャッシュして高速に提供
+2. ハッシュタグ検索はインデックスを効率的に使用
+3. タイムライン生成は非同期処理でバックグラウンドで実行
+4. メディアファイルはCDNを使用して配信 

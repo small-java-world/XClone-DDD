@@ -1,0 +1,336 @@
+---
+description: ユーザードメインの実装ガイドライン
+globs: ["backend/**/domain/user/**/*.{kt,java}"]
+tags: ["domain", "user", "backend", "ddd"]
+priority: 502
+version: 1.0.0
+---
+
+# ユーザードメイン実装ガイドライン
+
+## ドメイン概要
+
+ユーザードメインはXクローンアプリケーションの中核となるドメインで、ユーザーの登録、認証、プロファイル管理を担当します。
+
+## 主要な概念
+
+- **ユーザー**: システムの登録ユーザー
+- **プロファイル**: ユーザーの公開情報
+- **資格情報**: ユーザーの認証情報
+- **アカウント状態**: アクティブ、一時停止、凍結など
+
+## ドメインモデル
+
+### User エンティティ
+
+ユーザードメインの集約ルートです。
+
+```kotlin
+package com.example.xclone.domain.user.model
+
+import com.example.xclone.domain.common.TimeBasedUUID
+import java.time.LocalDateTime
+import java.util.UUID
+
+data class User private constructor(
+    val id: UUID,
+    val username: Username,
+    val displayName: String,
+    val email: Email,
+    val passwordHash: String,
+    val bio: String?,
+    val profileImageUrl: String?,
+    val accountStatus: AccountStatus,
+    val isVerified: Boolean,
+    val createdAt: LocalDateTime,
+    val updatedAt: LocalDateTime
+) {
+    companion object {
+        fun create(
+            username: Username,
+            displayName: String,
+            email: Email,
+            passwordHash: String
+        ): User {
+            val now = LocalDateTime.now()
+            return User(
+                id = TimeBasedUUID.generate(),
+                username = username,
+                displayName = displayName,
+                email = email,
+                passwordHash = passwordHash,
+                bio = null,
+                profileImageUrl = null,
+                accountStatus = AccountStatus.ACTIVE,
+                isVerified = false,
+                createdAt = now,
+                updatedAt = now
+            )
+        }
+    }
+    
+    // ユーザープロファイル更新
+    fun updateProfile(
+        displayName: String,
+        bio: String?,
+        profileImageUrl: String?
+    ): User {
+        return this.copy(
+            displayName = displayName,
+            bio = bio,
+            profileImageUrl = profileImageUrl,
+            updatedAt = LocalDateTime.now()
+        )
+    }
+    
+    // パスワード変更
+    fun changePassword(newPasswordHash: String): User {
+        return this.copy(
+            passwordHash = newPasswordHash,
+            updatedAt = LocalDateTime.now()
+        )
+    }
+    
+    // アカウント状態変更
+    fun updateAccountStatus(newStatus: AccountStatus): User {
+        if (accountStatus == newStatus) return this
+        
+        return this.copy(
+            accountStatus = newStatus,
+            updatedAt = LocalDateTime.now()
+        )
+    }
+    
+    // アカウント検証
+    fun verify(): User {
+        if (isVerified) return this
+        
+        return this.copy(
+            isVerified = true,
+            updatedAt = LocalDateTime.now()
+        )
+    }
+    
+    // アクティブなユーザーかどうか
+    fun isActive(): Boolean = accountStatus == AccountStatus.ACTIVE
+    
+    // 他のユーザーをフォローできるか
+    fun canFollow(otherUser: User): Boolean {
+        return this.id != otherUser.id && this.isActive() && otherUser.isActive()
+    }
+}
+```
+
+### 値オブジェクト
+
+```kotlin
+// Username 値オブジェクト
+data class Username private constructor(val value: String) {
+    companion object {
+        private val PATTERN = Regex("^[a-zA-Z0-9_]{3,15}$")
+        
+        fun of(value: String): Username {
+            require(value.matches(PATTERN)) {
+                "ユーザー名は英数字とアンダースコアのみで、3〜15文字の長さにする必要があります"
+            }
+            return Username(value.lowercase())
+        }
+    }
+    
+    override fun toString(): String = value
+}
+
+// Email 値オブジェクト
+data class Email private constructor(val value: String) {
+    companion object {
+        private val PATTERN = Regex("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$")
+        
+        fun of(value: String): Email {
+            require(value.matches(PATTERN)) {
+                "有効なメールアドレスを入力してください"
+            }
+            return Email(value.lowercase())
+        }
+    }
+    
+    override fun toString(): String = value
+}
+
+// AccountStatus 列挙型
+enum class AccountStatus {
+    ACTIVE,      // アクティブ
+    SUSPENDED,   // 一時停止
+    DEACTIVATED, // 非アクティブ化（ユーザーによる）
+    BANNED       // 凍結（管理者による）
+}
+```
+
+## リポジトリ
+
+```kotlin
+package com.example.xclone.domain.user.repository
+
+import com.example.xclone.domain.user.model.User
+import com.example.xclone.domain.user.model.Username
+import com.example.xclone.domain.user.model.Email
+import java.util.UUID
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
+
+interface UserRepository {
+    fun findById(id: UUID): User?
+    fun findByUsername(username: Username): User?
+    fun findByEmail(email: Email): User?
+    fun existsByUsername(username: Username): Boolean
+    fun existsByEmail(email: Email): Boolean
+    fun searchByDisplayNameOrUsername(query: String, pageable: Pageable): Page<User>
+    fun save(user: User): User
+}
+```
+
+## ドメインサービス
+
+```kotlin
+package com.example.xclone.domain.user.service
+
+import com.example.xclone.domain.user.model.User
+import com.example.xclone.domain.user.model.Username
+import com.example.xclone.domain.user.model.Email
+import com.example.xclone.domain.user.repository.UserRepository
+import com.example.xclone.domain.user.exception.UserAlreadyExistsException
+
+class UserService(private val userRepository: UserRepository) {
+    /**
+     * ユーザー名とメールアドレスの一意性を検証します
+     */
+    fun validateUserUniqueness(username: Username, email: Email) {
+        if (userRepository.existsByUsername(username)) {
+            throw UserAlreadyExistsException("このユーザー名は既に使用されています: ${username.value}")
+        }
+        
+        if (userRepository.existsByEmail(email)) {
+            throw UserAlreadyExistsException("このメールアドレスは既に使用されています: ${email.value}")
+        }
+    }
+    
+    /**
+     * ユーザーを検索します
+     */
+    fun searchUsers(query: String, page: Int, size: Int): List<User> {
+        val pageable = PageRequest.of(page, size)
+        return userRepository.searchByDisplayNameOrUsername(query, pageable).content
+    }
+}
+```
+
+## ドメインイベント
+
+```kotlin
+package com.example.xclone.domain.user.event
+
+sealed class UserEvent {
+    data class UserRegistered(
+        val userId: UUID,
+        val username: String,
+        val email: String,
+        val registeredAt: LocalDateTime
+    ) : UserEvent()
+    
+    data class UserProfileUpdated(
+        val userId: UUID,
+        val displayName: String,
+        val bio: String?,
+        val profileImageUrl: String?,
+        val updatedAt: LocalDateTime
+    ) : UserEvent()
+    
+    data class UserAccountStatusChanged(
+        val userId: UUID,
+        val previousStatus: AccountStatus,
+        val newStatus: AccountStatus,
+        val changedAt: LocalDateTime
+    ) : UserEvent()
+}
+```
+
+## 例外
+
+```kotlin
+package com.example.xclone.domain.user.exception
+
+sealed class UserException(message: String) : RuntimeException(message)
+
+class UserNotFoundException(message: String) : UserException(message)
+class UserAlreadyExistsException(message: String) : UserException(message)
+class InvalidCredentialsException(message: String) : UserException(message)
+class AccountInactiveException(message: String) : UserException(message)
+```
+
+## ユースケース例
+
+### ユーザー登録
+
+```kotlin
+// アプリケーション層のユースケース
+class RegisterUserUseCase(
+    private val userRepository: UserRepository,
+    private val userService: UserService,
+    private val passwordEncoder: PasswordEncoder,
+    private val eventPublisher: ApplicationEventPublisher
+) {
+    fun execute(request: UserRegistrationRequest): User {
+        val username = Username.of(request.username)
+        val email = Email.of(request.email)
+        
+        // ユーザー名とメールアドレスの一意性を検証
+        userService.validateUserUniqueness(username, email)
+        
+        // パスワードハッシュ化
+        val passwordHash = passwordEncoder.encode(request.password)
+        
+        // ユーザー作成
+        val user = User.create(
+            username = username,
+            displayName = request.displayName ?: request.username,
+            email = email,
+            passwordHash = passwordHash
+        )
+        
+        // 保存
+        val savedUser = userRepository.save(user)
+        
+        // イベント発行
+        eventPublisher.publishEvent(
+            UserEvent.UserRegistered(
+                userId = savedUser.id,
+                username = savedUser.username.value,
+                email = savedUser.email.value,
+                registeredAt = savedUser.createdAt
+            )
+        )
+        
+        return savedUser
+    }
+}
+```
+
+## 検証ルール
+
+1. ユーザー名は3〜15文字の英数字とアンダースコアのみを含む
+2. メールアドレスは標準的なフォーマット検証を行う
+3. パスワードは最低8文字で、少なくとも1つの数字、1つの小文字、1つの大文字を含む
+4. 表示名は最大50文字
+5. 自己紹介文は最大160文字
+
+## セキュリティ考慮事項
+
+1. パスワードは常にハッシュ化して保存（BCryptを使用）
+2. ユーザーIDとメールアドレスは機密情報として扱う
+3. アカウント状態の変更は監査ログを記録する
+4. 認証失敗は回数制限を設け、ブルートフォース攻撃を防止する
+
+## パフォーマンス考慮事項
+
+1. ユーザー検索はインデックスを適切に設定し、効率的なクエリを使用する
+2. プロファイル画像はCDNを使用し、最適化されたサイズで提供する
+3. ユーザー情報のキャッシュを実装し、頻繁なデータベースアクセスを低減する 
