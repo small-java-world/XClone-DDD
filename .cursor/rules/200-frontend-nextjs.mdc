@@ -1,0 +1,209 @@
+---
+description: Apply Next.js and React best practices for frontend development
+globs: ["frontend/**/*.{ts,tsx,js,jsx}"]
+tags: ["frontend", "nextjs", "react", "typescript"]
+priority: 4
+version: 1.0.0
+---
+
+# Frontend Development: Next.js & React
+
+## Technology Stack
+- Next.js App Router
+- React 19+
+- TypeScript
+- Vitest for unit testing
+- Container/Presentational pattern
+- React Hooks for state management
+
+## Project Structure
+```
+frontend/
+├── src/
+│   ├── app/                         # App Router directory
+│   │   ├── api/                     # API Routes
+│   │   ├── (auth)/                  # Authentication pages
+│   │   │   ├── login/
+│   │   │   └── signup/
+│   │   ├── [username]/              # User profile pages
+│   │   │   ├── page.tsx
+│   │   │   └── status/[id]/         # Post detail pages
+│   │   ├── home/                    # Home timeline
+│   │   ├── notifications/           # Notifications list
+│   │   ├── explore/                 # Explore page
+│   │   └── layout.tsx
+│   │
+│   ├── components/                  # Components
+│   │   ├── common/                  # Common components
+│   │   ├── layouts/                 # Layout components
+│   │   ├── post/                    # Post-related components
+│   │   │   ├── PostCard.tsx         # Post card (Presentational)
+│   │   │   └── PostCardContainer.tsx # Post card container (Container)
+│   │   ├── user/                    # User-related components
+│   │   └── form/                    # Form components
+│   │
+│   ├── hooks/                       # Custom hooks
+│   │   ├── usePost.ts
+│   │   ├── useTimeline.ts
+│   │   └── useUser.ts
+│   │
+│   ├── lib/                         # Utility functions
+│   │   ├── api.ts                   # API call functions
+│   │   └── utils.ts                 # General utilities
+│   │
+│   ├── types/                       # Type definitions
+│   │   ├── post.ts
+│   │   ├── user.ts
+│   │   └── index.ts
+│   │
+│   └── styles/                      # Styles
+│       └── globals.css
+│
+├── public/                          # Static files
+│   ├── images/
+│   └── favicon.ico
+│
+├── tests/                           # Tests
+│   ├── unit/                        # Unit tests
+│   └── e2e/                         # E2E tests
+```
+
+## Container/Presentational Pattern
+- **Presentational Components**:
+  - Concerned with how things look
+  - Don't have dependencies on the rest of the app
+  - Receive data and callbacks via props
+  - Rarely have their own state
+
+- **Container Components**:
+  - Concerned with how things work
+  - Connect to data sources
+  - Manage state and side effects
+  - Pass data and callbacks to presentational components
+
+## React Hooks Guidelines
+- **State Management**:
+  - Use `useState` for simple state
+  - Use `useReducer` for complex state transitions
+  - Use `useMemo` for expensive calculations
+
+- **Data Fetching**:
+  - Avoid using `useEffect` for data fetching
+  - Use React Query or SWR for efficient data fetching
+  - Leverage React 19's features like `use` for async data
+
+- **Form Management**:
+  - Use `useFormState` and `useFormStatus` for form management
+
+- **Performance Optimization**:
+  - Use `useOptimistic` for optimistic UI updates
+  - Apply proper memoization with `useMemo` and `useCallback`
+
+## Component Structure
+- Each component should have a single responsibility
+- Prefer functional components with hooks
+- Export named components
+- Co-locate related components in the same file or directory
+
+## TypeScript Usage
+- Use TypeScript for all code
+- Define interfaces for props and state
+- Use proper type annotations for functions
+- Avoid `any` type, use proper typing or `unknown` if necessary
+
+## Example Presentational Component
+```tsx
+// src/components/post/PostCard.tsx
+import React from 'react';
+import { format } from 'date-fns';
+import { Post } from '@/types/post';
+import { User } from '@/types/user';
+
+interface PostCardProps {
+  post: Post;
+  author: User;
+  isLiked: boolean;
+  likeCount: number;
+  replyCount: number;
+  onLike: () => void;
+  onReply: () => void;
+  onRepost: () => void;
+}
+
+export const PostCard: React.FC<PostCardProps> = ({
+  post,
+  author,
+  isLiked,
+  likeCount,
+  replyCount,
+  onLike,
+  onReply,
+  onRepost
+}) => {
+  return (
+    <div className="border-b border-gray-200 p-4 hover:bg-gray-50">
+      <div className="flex space-x-3">
+        <img
+          src={author.profileImageUrl || '/images/default-avatar.png'}
+          alt={author.displayName}
+          className="h-10 w-10 rounded-full"
+        />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center">
+            <p className="font-bold text-gray-900">{author.displayName}</p>
+            <p className="ml-2 text-sm text-gray-500">@{author.username}</p>
+            <span className="mx-1 text-gray-500">·</span>
+            <p className="text-sm text-gray-500">
+              {format(new Date(post.createdAt), 'MMM d')}
+            </p>
+          </div>
+          <p className="mt-1 text-gray-900">{post.content}</p>
+          {/* Component implementation */}
+        </div>
+      </div>
+    </div>
+  );
+};
+```
+
+## Example Container Component
+```tsx
+// src/components/post/PostCardContainer.tsx
+import React from 'react';
+import { useOptimistic } from 'react';
+import { PostCard } from './PostCard';
+import { usePost } from '@/hooks/usePost';
+
+interface PostCardContainerProps {
+  postId: string;
+}
+
+export const PostCardContainer: React.FC<PostCardContainerProps> = ({ postId }) => {
+  const { post, author, isLiked, likeCount, replyCount, likePost, unlikePost } = usePost(postId);
+  
+  const [optimisticLiked, setOptimisticLiked] = useOptimistic(
+    isLiked,
+    (state, newValue: boolean) => newValue
+  );
+  
+  const [optimisticLikeCount, setOptimisticLikeCount] = useOptimistic(
+    likeCount,
+    (state, newValue: number) => newValue
+  );
+  
+  // Component implementation
+  
+  return (
+    <PostCard
+      post={post}
+      author={author}
+      isLiked={optimisticLiked}
+      likeCount={optimisticLikeCount}
+      replyCount={replyCount}
+      onLike={handleLike}
+      onReply={handleReply}
+      onRepost={handleRepost}
+    />
+  );
+};
+``` 

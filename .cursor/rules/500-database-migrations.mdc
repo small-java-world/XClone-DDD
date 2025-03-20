@@ -1,0 +1,151 @@
+---
+description: Apply best practices for database management and Flyway migrations
+globs: ["backend/src/main/resources/db/migration/**", "**/*Repository*", "**/*Entity*"]
+tags: ["database", "flyway", "migration", "jooq"]
+priority: 4
+version: 1.0.0
+---
+
+# Database Management and Migrations
+
+## Database Architecture
+- MySQL as the primary database
+- Redis for caching
+- jOOQ for type-safe SQL generation
+- Flyway for database migrations
+
+## Database Schema Design
+- Follow domain boundaries in schema design
+- Use UUID as primary keys for entities
+- Apply appropriate indexes for query optimization
+- Follow naming conventions for tables and columns
+- Implement proper foreign key constraints
+
+## Flyway Migration Strategy
+- Version migrations with timestamp prefix: `V{yyyy}{MM}{dd}{HH}{mm}{ss}__descriptive_name.sql`
+- One change per migration file
+- Migrations should be immutable once committed
+- Write backward compatible migrations where possible
+- Include comments to explain complex migration logic
+
+### Example Flyway Migration
+
+```sql
+-- V20250320130000__create_users_table.sql
+-- Create the users table
+
+CREATE TABLE users (
+    id VARCHAR(36) NOT NULL,
+    username VARCHAR(50) NOT NULL,
+    display_name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    bio TEXT,
+    profile_image_url VARCHAR(255),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE INDEX idx_username (username),
+    UNIQUE INDEX idx_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+```sql
+-- V20250320130100__create_posts_table.sql
+-- Create the posts table
+
+CREATE TABLE posts (
+    id VARCHAR(36) NOT NULL,
+    user_id VARCHAR(36) NOT NULL,
+    content TEXT NOT NULL,
+    media_url VARCHAR(255),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_user_id (user_id),
+    INDEX idx_created_at (created_at),
+    CONSTRAINT fk_posts_user_id FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+## jOOQ Integration
+- Generate jOOQ classes from the database schema
+- Use jOOQ for type-safe SQL queries
+- Leverage jOOQ for complex query construction
+- Use jOOQ data classes for database operations
+
+### Example Repository Implementation with jOOQ
+
+```kotlin
+@Repository
+class JooqUserRepository(private val dsl: DSLContext) : UserRepository {
+    
+    override fun findById(id: UUID): User? {
+        return dsl.selectFrom(USERS)
+            .where(USERS.ID.eq(id.toString()))
+            .fetchOneInto(UserRecord::class.java)
+            ?.toDomain()
+    }
+    
+    override fun findByUsername(username: String): User? {
+        return dsl.selectFrom(USERS)
+            .where(USERS.USERNAME.eq(username))
+            .fetchOneInto(UserRecord::class.java)
+            ?.toDomain()
+    }
+    
+    override fun save(user: User): User {
+        val record = UserRecord().apply {
+            id = user.id.toString()
+            username = user.username
+            displayName = user.displayName
+            email = user.email
+            passwordHash = user.passwordHash
+            bio = user.bio
+            profileImageUrl = user.profileImageUrl
+            createdAt = user.createdAt
+            updatedAt = user.updatedAt
+        }
+        
+        dsl.insertInto(USERS)
+            .set(record)
+            .onDuplicateKeyUpdate()
+            .set(record)
+            .execute()
+            
+        return user
+    }
+    
+    private fun UserRecord.toDomain(): User {
+        return User(
+            id = UUID.fromString(id),
+            username = username,
+            displayName = displayName,
+            email = email,
+            passwordHash = passwordHash,
+            bio = bio,
+            profileImageUrl = profileImageUrl,
+            createdAt = createdAt,
+            updatedAt = updatedAt
+        )
+    }
+}
+```
+
+## Redis Caching Strategy
+- Cache frequently accessed data
+- Use appropriate TTL (Time-To-Live) for cache entries
+- Implement cache invalidation on data updates
+- Use Redis for session storage and distributed locks
+
+## Migration Testing
+- Test migrations in CI/CD pipeline
+- Use test containers for integration testing
+- Verify migrations work with production-like data
+- Include rollback tests for critical migrations
+
+## Performance Considerations
+- Create appropriate indexes for common queries
+- Monitor query performance and optimize slow queries
+- Use database connection pooling
+- Consider partitioning for large tables 

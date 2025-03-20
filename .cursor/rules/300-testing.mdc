@@ -1,0 +1,178 @@
+---
+description: Apply testing best practices across backend and frontend
+globs: ["**/*test*", "**/*spec*"]
+tags: ["testing", "tdd", "e2e", "unit"]
+priority: 4
+version: 1.0.0
+---
+
+# Testing Strategy
+
+## Core Testing Principles
+- Test-Driven Development (TDD) approach for all features
+- Test coverage for all critical paths
+- Separation of test types (unit, integration, E2E)
+- Performance-oriented test execution
+
+## Backend Testing (Kotlin/Spring Boot)
+- **Framework**: Kotest + Mockk
+- **Test Types**:
+  - Unit Tests: Focus on domain logic and use cases
+  - Integration Tests: Test adapter layer with repositories
+  - API Tests: Test HTTP endpoints
+
+### Kotest Style Guide
+- Use StringSpec for simple tests
+- Use BehaviorSpec for more complex scenarios
+- Name tests descriptively: "should X when Y"
+
+### Example Unit Test
+```kotlin
+class CreateUserUseCaseTest : StringSpec({
+    val userRepository = mockk<UserRepository>()
+    val passwordEncoder = mockk<PasswordEncoder>()
+    val useCase = CreateUserUseCase(userRepository, passwordEncoder)
+
+    "should create a new user when valid data is provided" {
+        // Arrange
+        val command = CreateUserCommand(
+            username = "testuser",
+            displayName = "Test User",
+            email = "test@example.com",
+            password = "password123"
+        )
+        
+        val encodedPassword = "encoded_password"
+        every { passwordEncoder.encode(command.password) } returns encodedPassword
+        every { userRepository.findByUsername(command.username) } returns null
+        every { userRepository.findByEmail(command.email) } returns null
+        
+        val userSlot = slot<User>()
+        every { userRepository.save(capture(userSlot)) } answers { userSlot.captured }
+        
+        // Act
+        val result = useCase.execute(command)
+        
+        // Assert
+        result.username shouldBe command.username
+        result.displayName shouldBe command.displayName
+        
+        verify(exactly = 1) {
+            userRepository.findByUsername(command.username)
+            passwordEncoder.encode(command.password)
+            userRepository.save(any())
+        }
+    }
+})
+```
+
+## Frontend Testing (Next.js/React)
+- **Framework**: Vitest for unit tests
+- **Component Testing**: Testing Library
+- **Test Types**:
+  - Unit Tests: Test hooks and utility functions
+  - Component Tests: Test component rendering and interactions
+  - Integration Tests: Test component interactions
+
+### Example Component Test
+```typescript
+// tests/unit/components/post/PostCard.test.tsx
+import { render, screen, fireEvent } from '@testing-library/react';
+import { PostCard } from '@/components/post/PostCard';
+import { vi } from 'vitest';
+
+describe('PostCard', () => {
+  const mockPost = {
+    id: '1',
+    content: 'Test post content',
+    createdAt: new Date().toISOString(),
+    mediaUrl: null
+  };
+  
+  const mockAuthor = {
+    id: '1',
+    username: 'testuser',
+    displayName: 'Test User',
+    profileImageUrl: '/images/default-avatar.png'
+  };
+  
+  const mockHandlers = {
+    onLike: vi.fn(),
+    onReply: vi.fn(),
+    onRepost: vi.fn()
+  };
+  
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  
+  test('renders post content correctly', () => {
+    render(
+      <PostCard
+        post={mockPost}
+        author={mockAuthor}
+        isLiked={false}
+        likeCount={5}
+        replyCount={2}
+        onLike={mockHandlers.onLike}
+        onReply={mockHandlers.onReply}
+        onRepost={mockHandlers.onRepost}
+      />
+    );
+    
+    expect(screen.getByText('Test post content')).toBeInTheDocument();
+    expect(screen.getByText('Test User')).toBeInTheDocument();
+  });
+});
+```
+
+## E2E Testing
+- **Framework**: Playwright
+- **Strategy**: 
+  - Separate tests into parallel and sequential execution
+  - Parallel: Read-only tests that don't modify data
+  - Sequential: Tests that modify data and need isolation
+
+### E2E Test Structure
+- **Parallel Tests**:
+  - UI display tests
+  - Read-only feature tests
+  - Navigation tests
+
+- **Sequential Tests**:
+  - User registration
+  - Post creation
+  - Following/unfollowing
+
+### Example E2E Test
+```typescript
+// tests/e2e/auth.spec.ts
+import { test, expect } from '@playwright/test';
+
+test.describe('Authentication', () => {
+  test('should allow user to login', async ({ page }) => {
+    // Navigate to login page
+    await page.goto('/login');
+    
+    // Fill login form
+    await page.fill('input[name="username"]', 'testuser');
+    await page.fill('input[name="password"]', 'password123');
+    
+    // Submit form
+    await page.click('button[type="submit"]');
+    
+    // Verify redirect to home page
+    await expect(page).toHaveURL('/home');
+    
+    // Verify user is logged in
+    await expect(page.locator('[data-testid="user-nav"]')).toContainText('Test User');
+  });
+});
+```
+
+## Test Performance Optimization
+- Group related tests to optimize setup/teardown
+- Use test fixtures and factory functions for test data
+- Cache test results when possible
+- Configure parallel execution for appropriate tests
+- Implement proper cleanup for test resources 

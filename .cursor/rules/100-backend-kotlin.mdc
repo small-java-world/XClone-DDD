@@ -1,0 +1,162 @@
+---
+description: Apply Kotlin and Spring Boot best practices for backend development
+globs: ["backend/**/*.kt"]
+tags: ["backend", "kotlin", "spring-boot"]
+priority: 4
+version: 1.0.0
+---
+
+# Backend Development: Kotlin & Spring Boot
+
+## Technology Stack
+- Kotlin 1.9+ with Java 21
+- Spring Boot 3.2+
+- Gradle build system
+- Kotest + Mockk for testing
+- jOOQ for ORM
+- Flyway for database migrations
+
+## Project Structure
+```
+backend/
+├── src/
+│   ├── main/
+│   │   ├── kotlin/
+│   │   │   └── com/
+│   │   │       └── example/
+│   │   │           └── xclone/
+│   │   │               ├── domain/                  # Domain Layer
+│   │   │               │   ├── user/
+│   │   │               │   │   ├── entity/          # Entities
+│   │   │               │   │   ├── repository/      # Repository Interfaces
+│   │   │               │   │   └── service/         # Domain Services
+│   │   │               │   ├── post/
+│   │   │               │   ├── timeline/
+│   │   │               │   ├── notification/
+│   │   │               │   └── relationship/
+│   │   │               │
+│   │   │               ├── application/             # Use Case Layer
+│   │   │               │   ├── user/
+│   │   │               │   │   ├── command/         # Command Objects
+│   │   │               │   │   ├── dto/             # Data Transfer Objects
+│   │   │               │   │   └── usecase/         # Use Case Implementations
+│   │   │               │   ├── post/
+│   │   │               │   ├── timeline/
+│   │   │               │   ├── notification/
+│   │   │               │   └── relationship/
+│   │   │               │
+│   │   │               ├── adapter/                 # Adapter Layer
+│   │   │               │   ├── controller/          # REST API Controllers
+│   │   │               │   ├── presenter/           # Response Transformers
+│   │   │               │   ├── repository/          # Repository Implementations
+│   │   │               │   └── gateway/             # External Service Connections
+│   │   │               │
+│   │   │               └── infrastructure/          # Infrastructure Layer
+│   │   │                   ├── config/              # Configuration Classes
+│   │   │                   ├── database/            # Database Related
+│   │   │                   ├── security/            # Authentication & Authorization
+│   │   │                   └── storage/             # Storage
+│   │   │
+│   │   └── resources/
+│   │       ├── db/
+│   │       │   └── migration/                       # Flyway Migration Files
+│   │       ├── application.yml
+│   │       └── application-dev.yml
+│   │
+│   └── test/
+│       ├── kotlin/                                  # Test Code
+│       └── resources/                               # Test Resources
+```
+
+## Clean Architecture Implementation
+- Each layer has specific responsibilities and dependencies
+- Dependencies point inward (from outer to inner layers)
+- Domain models are independent of frameworks
+- Use interfaces to define repository contracts in domain layer
+- Implement repositories in adapter layer
+
+## Coding Conventions
+- Follow Kotlin coding conventions
+- Use immutable data classes for domain entities
+- Prefer expression body functions for simple functions
+- Use named parameters for improved readability
+- Apply consistent naming patterns for similar components
+
+## Use Case Implementation
+- Name use cases with the pattern: `{Action}UseCase`
+- Each use case should have a single responsibility
+- Use command objects as input for use cases
+- Use DTOs to transfer data between layers
+- Handle validation within use cases
+
+## Testing Strategy
+- Use Kotest for testing framework
+- Use Mockk for mocking dependencies
+- Write tests for each layer:
+  - Domain: Unit tests for domain logic
+  - Application: Tests for use cases with mocked dependencies
+  - Adapter: Integration tests
+  - Infrastructure: Integration tests with test containers
+
+## Example Domain Entity
+```kotlin
+package com.example.xclone.domain.user.entity
+
+import java.time.LocalDateTime
+import java.util.UUID
+
+data class User(
+    val id: UUID,
+    val username: String,
+    val displayName: String,
+    val email: String,
+    val passwordHash: String,
+    val bio: String?,
+    val profileImageUrl: String?,
+    val createdAt: LocalDateTime,
+    val updatedAt: LocalDateTime
+) {
+    fun updateProfile(displayName: String, bio: String?, profileImageUrl: String?): User {
+        return this.copy(
+            displayName = displayName,
+            bio = bio,
+            profileImageUrl = profileImageUrl,
+            updatedAt = LocalDateTime.now()
+        )
+    }
+}
+```
+
+## Example Use Case
+```kotlin
+@Service
+class CreateUserUseCase(
+    private val userRepository: UserRepository,
+    private val passwordEncoder: PasswordEncoder
+) {
+    fun execute(command: CreateUserCommand): User {
+        // Validation
+        userRepository.findByUsername(command.username)?.let {
+            throw IllegalArgumentException("Username already exists")
+        }
+        
+        // Business logic
+        val passwordHash = passwordEncoder.encode(command.password)
+        val now = LocalDateTime.now()
+        val user = User(
+            id = UUID.randomUUID(),
+            username = command.username,
+            displayName = command.displayName,
+            email = command.email,
+            passwordHash = passwordHash,
+            bio = null,
+            profileImageUrl = null,
+            createdAt = now,
+            updatedAt = now
+        )
+        
+        // Persistence
+        return userRepository.save(user)
+    }
+}
+``` 
