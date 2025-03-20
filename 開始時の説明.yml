@@ -59,8 +59,8 @@ description: 会社のテックブログの題材として、Xのクローンア
         - 適切なHooksの選択でパフォーマンス最適化
         - React19の新Hooks積極活用（useActionState、useOptimistic）
       データフェッチング:
-        - useEffectでの直接フェッチは非推奨
-        - React QueryまたはSWRを活用
+        - CSRだけ利用なのでfetchでapi呼び出し
+        - クライアントコンポーネントでは、useEffectでの直接フェッチは最小限に抑える
       フォーム管理:
         - useFormStateとuseFormStatusの活用
       状態管理:
