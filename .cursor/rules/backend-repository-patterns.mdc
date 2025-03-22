@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: リポジトリパターンの実装とインターフェース設計
 globs: ["**/src/main/kotlin/**/domain/repository/*.kt", "**/src/main/kotlin/**/infrastructure/repository/*.kt"]
 alwaysApply: false
@@ -112,6 +117,7 @@ class AndSpecification(
 - トランザクション管理
 - キャッシュ管理
 
+
 ### jOOQを使用した実装例
 
 ```kotlin
@@ -160,173 +166,60 @@ class JooqProductRepository(
 }
 ```
 
-### クエリサービスパターン
+### 合成リポジトリパターン - 読み書き分離
 
-読み取り操作の最適化と関心事の分離のために、クエリサービスパターンを使用できます。このパターンでは、リポジトリは集約のライフサイクル管理に集中し、複雑な検索やレポートはクエリサービスが担当します。
-
-```kotlin
-// クエリサービスインターフェース
-interface ProductQueryService {
-    fun findById(id: UUID): ProductDto?
-    fun findActiveProducts(pageable: Pageable): Page<ProductDto>
-    fun findBySellerAndPriceRange(sellerId: UUID, minPrice: BigDecimal, maxPrice: BigDecimal): List<ProductDto>
-    fun findTopSellingProducts(limit: Int): List<ProductSummaryDto>
-}
-
-// クエリサービスの実装
-@Service
-class ProductQueryServiceImpl(
-    private val dsl: DSLContext
-) : ProductQueryService {
-    
-    override fun findById(id: UUID): ProductDto? {
-        return dsl.select(
-                PRODUCTS.ID,
-                PRODUCTS.SELLER_ID,
-                PRODUCTS.NAME,
-                PRODUCTS.DESCRIPTION,
-                PRODUCTS.PRICE,
-                PRODUCTS.STATUS,
-                PRODUCTS.CREATED_AT,
-                PRODUCTS.UPDATED_AT,
-                SELLERS.NAME.`as`("seller_name")
-            )
-            .from(PRODUCTS)
-            .join(SELLERS).on(PRODUCTS.SELLER_ID.eq(SELLERS.ID))
-            .where(PRODUCTS.ID.eq(id))
-            .fetchOneInto(ProductDto::class.java)
-    }
-    
-    override fun findActiveProducts(pageable: Pageable): Page<ProductDto> {
-        // ページネーション対応のクエリ実装
-        val query = dsl.select(
-                PRODUCTS.ID,
-                PRODUCTS.SELLER_ID,
-                PRODUCTS.NAME,
-                PRODUCTS.DESCRIPTION,
-                PRODUCTS.PRICE,
-                PRODUCTS.STATUS,
-                PRODUCTS.CREATED_AT,
-                PRODUCTS.UPDATED_AT,
-                SELLERS.NAME.`as`("seller_name")
-            )
-            .from(PRODUCTS)
-            .join(SELLERS).on(PRODUCTS.SELLER_ID.eq(SELLERS.ID))
-            .where(PRODUCTS.STATUS.eq(ProductStatus.ACTIVE.name))
-        
-        // ページネーション処理
-        val total = dsl.selectCount().from(PRODUCTS)
-            .where(PRODUCTS.STATUS.eq(ProductStatus.ACTIVE.name))
-            .fetchOne(0, Long::class.java) ?: 0L
-        
-        val results = query
-            .orderBy(PRODUCTS.CREATED_AT.desc())
-            .limit(pageable.pageSize)
-            .offset(pageable.offset)
-            .fetchInto(ProductDto::class.java)
-        
-        return PageImpl(results, pageable, total)
-    }
-    
-    override fun findBySellerAndPriceRange(sellerId: UUID, minPrice: BigDecimal, maxPrice: BigDecimal): List<ProductDto> {
-        return dsl.select(
-                PRODUCTS.ID,
-                PRODUCTS.SELLER_ID,
-                PRODUCTS.NAME,
-                PRODUCTS.DESCRIPTION,
-                PRODUCTS.PRICE,
-                PRODUCTS.STATUS,
-                PRODUCTS.CREATED_AT,
-                PRODUCTS.UPDATED_AT,
-                SELLERS.NAME.`as`("seller_name")
-            )
-            .from(PRODUCTS)
-            .join(SELLERS).on(PRODUCTS.SELLER_ID.eq(SELLERS.ID))
-            .where(
-                PRODUCTS.SELLER_ID.eq(sellerId)
-                .and(PRODUCTS.PRICE.ge(minPrice))
-                .and(PRODUCTS.PRICE.le(maxPrice))
-                .and(PRODUCTS.STATUS.eq(ProductStatus.ACTIVE.name))
-            )
-            .orderBy(PRODUCTS.PRICE.asc())
-            .fetchInto(ProductDto::class.java)
-    }
-    
-    override fun findTopSellingProducts(limit: Int): List<ProductSummaryDto> {
-        // 複雑な集計クエリ
-        return dsl.select(
-                PRODUCTS.ID,
-                PRODUCTS.NAME,
-                PRODUCTS.PRICE,
-                DSL.count(ORDER_ITEMS.ID).`as`("sales_count"),
-                DSL.sum(ORDER_ITEMS.QUANTITY).`as`("total_quantity")
-            )
-            .from(PRODUCTS)
-            .join(ORDER_ITEMS).on(PRODUCTS.ID.eq(ORDER_ITEMS.PRODUCT_ID))
-            .join(ORDERS).on(ORDER_ITEMS.ORDER_ID.eq(ORDERS.ID))
-            .where(ORDERS.STATUS.eq(OrderStatus.COMPLETED.name))
-            .groupBy(PRODUCTS.ID, PRODUCTS.NAME, PRODUCTS.PRICE)
-            .orderBy(DSL.field("sales_count").desc())
-            .limit(limit)
-            .fetchInto(ProductSummaryDto::class.java)
-    }
-}
-
-// DTOクラス
-data class ProductDto(
-    val id: UUID,
-    val sellerId: UUID,
-    val name: String,
-    val description: String,
-    val price: BigDecimal,
-    val status: String,
-    val createdAt: Instant,
-    val updatedAt: Instant,
-    val sellerName: String? // 結合データ
-)
-
-data class ProductSummaryDto(
-    val id: UUID,
-    val name: String,
-    val price: BigDecimal,
-    val salesCount: Int,
-    val totalQuantity: Int
-)
-```
-
-### リポジトリとクエリサービスの使い分け
-
-- **リポジトリ**: 集約の整合性を保つ操作（作成、更新、削除）とIDによる取得に使用
-- **クエリサービス**: 複雑な検索条件、結合、集計を含むデータ取得に使用
+パフォーマンス最適化のために読み取り/書き込み操作を分離する場合:
 
 ```kotlin
-@UseCase
-class CreateProductUseCase(
-    private val productRepository: ProductRepository
-) {
-    fun execute(command: CreateProductCommand): ProductId {
-        // ドメインモデルを作成
-        val product = Product.create(/* パラメータ */)
-        
-        // リポジトリを使用して永続化
-        val savedProduct = productRepository.save(product)
-        
-        return savedProduct.id
-    }
+// 読み取り専用操作のインターフェース
+interface ProductReadRepository {
+    fun findById(id: ProductId): Product?
+    fun findAll(pageable: Pageable): Page<Product>
+    fun findByStatus(status: ProductStatus): List<Product>
 }
 
-@UseCase
-class FindProductsBySellerAndPriceRangeUseCase(
-    private val productQueryService: ProductQueryService
-) {
-    fun execute(query: FindProductsQuery): List<ProductDto> {
-        // クエリサービスを使用して検索
-        return productQueryService.findBySellerAndPriceRange(
-            query.sellerId,
-            query.minPrice,
-            query.maxPrice
-        )
-    }
+// 書き込み操作のインターフェース
+interface ProductWriteRepository {
+    fun save(product: Product): Product
+    fun delete(id: ProductId)
+}
+
+// 合成インターフェース
+interface ProductRepository : ProductReadRepository, ProductWriteRepository
+
+// 読み取り最適化実装
+@Repository
+class ProductReadJooqRepository(
+    private val dsl: DSLContext,
+    private val productMapper: ProductJooqMapper
+) : ProductReadRepository {
+    // jOOQを使用した読み取り最適化クエリ
+}
+
+// 書き込み実装
+@Repository
+class ProductWriteJpaRepository(
+    private val productJpaRepository: ProductJpaRepository,
+    private val productMapper: ProductMapper
+) : ProductWriteRepository {
+    // JPAを使用した書き込み操作
+}
+
+// 合成実装
+@Repository
+@Primary
+class CompositeProductRepository(
+    private val readRepository: ProductReadRepository,
+    private val writeRepository: ProductWriteRepository
+) : ProductRepository {
+    // 読み取りメソッドは読み取りリポジトリに委譲
+    override fun findById(id: ProductId): Product? = readRepository.findById(id)
+    override fun findAll(pageable: Pageable): Page<Product> = readRepository.findAll(pageable)
+    override fun findByStatus(status: ProductStatus): List<Product> = readRepository.findByStatus(status)
+    
+    // 書き込みメソッドは書き込みリポジトリに委譲
+    override fun save(product: Product): Product = writeRepository.save(product)
+    override fun delete(id: ProductId) = writeRepository.delete(id)
 }
 ```
 
