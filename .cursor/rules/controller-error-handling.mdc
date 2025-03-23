@@ -1,0 +1,53 @@
+---
+description: コントローラーのエラーハンドリング
+globs: **/adapter/api/error/*.kt
+alwaysApply: false
+---
+# コントローラーのエラーハンドリング
+
+## グローバルエラーハンドラー
+```kotlin
+@RestControllerAdvice
+class GlobalExceptionHandler {
+    @ExceptionHandler(MethodArgumentNotValidException::class)
+    fun handleValidationException(ex: MethodArgumentNotValidException): ResponseEntity<ErrorResponse> {
+        val errors = ex.bindingResult.fieldErrors.map { 
+            FieldError(it.field, it.defaultMessage ?: "不明なエラー") 
+        }
+        
+        return ResponseEntity
+            .badRequest()
+            .body(ErrorResponse("入力値が不正です", errors))
+    }
+    
+    @ExceptionHandler(EntityNotFoundException::class)
+    fun handleNotFoundException(ex: EntityNotFoundException): ResponseEntity<ErrorResponse> {
+        return ResponseEntity
+            .status(HttpStatus.NOT_FOUND)
+            .body(ErrorResponse(ex.message ?: "リソースが見つかりません"))
+    }
+}
+```
+
+## エラーレスポンスモデル
+```kotlin
+data class ErrorResponse(
+    val message: String,
+    val errors: List<FieldError> = emptyList()
+)
+
+data class FieldError(
+    val field: String,
+    val message: String
+)
+```
+
+## HTTPステータスコード
+| エラー | ステータスコード |
+|------|--------------|
+| バリデーションエラー | 400 Bad Request |
+| 認証エラー | 401 Unauthorized |
+| 権限エラー | 403 Forbidden |
+| 存在しないリソース | 404 Not Found |
+| 競合 | 409 Conflict |
+| サーバーエラー | 500 Internal Server Error | 

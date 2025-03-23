@@ -1,0 +1,53 @@
+---
+description: ユースケースのコマンドパターン実装
+globs: **/application/usecase/**/*UseCase.kt
+alwaysApply: false
+---
+# ユースケースのコマンドパターン実装
+
+## コマンドオブジェクト
+```kotlin
+// 単純なデータ構造としてのコマンド
+data class CreateUserCommand(
+    val email: String,
+    val name: String,
+    val age: Int?
+)
+```
+
+## ユースケース実装
+```kotlin
+@Service
+class CreateUserUseCase(
+    private val userRepository: UserRepository,
+    private val transactionTemplate: TransactionTemplate
+) {
+    fun execute(command: CreateUserCommand): UserId {
+        return transactionTemplate.execute {
+            // コマンドからドメインオブジェクトへの変換
+            val email = Email.from(command.email)
+            val name = Name.from(command.name)
+            val age = command.age?.let { Age.from(it) }
+            
+            // ドメインロジックの実行
+            val user = User.create(email, name, age)
+            
+            // 永続化
+            userRepository.save(user)
+            
+            // 識別子を返却
+            user.id
+        }
+    }
+}
+```
+
+## パターン
+- コマンドは単純なデータホルダー
+- ユースケースは単一責務
+- トランザクションはユースケース内で管理
+- バリデーションはドメインオブジェクト生成時に実行
+
+## アンチパターン
+❌ 複数の操作を1つのユースケースに入れる
+❌ ドメインロジックをユースケースに漏らす 

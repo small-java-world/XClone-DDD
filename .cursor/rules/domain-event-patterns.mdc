@@ -1,0 +1,44 @@
+---
+description: ドメインイベント実装パターン
+globs: **/domain/model/**/*Event.kt
+alwaysApply: false
+---
+# ドメインイベント実装パターン
+
+## 実装例
+```kotlin
+// イベント定義
+interface DomainEvent
+
+data class UserCreatedEvent(
+    val userId: UserId,
+    val occurredAt: Instant = Instant.now()
+) : DomainEvent
+
+// エンティティでのイベント発行
+class User private constructor(
+    val id: UserId,
+    // 他のプロパティ
+    private val events: MutableList<DomainEvent> = mutableListOf()
+) {
+    // イベントの取得と消去
+    fun captureEvents(): List<DomainEvent> {
+        val capturedEvents = events.toList()
+        events.clear()
+        return capturedEvents
+    }
+    
+    companion object {
+        fun create(email: Email): User {
+            val user = User(UserId.generate(), email, UserStatus.ACTIVE)
+            user.events.add(UserCreatedEvent(user.id))
+            return user
+        }
+    }
+}
+```
+
+## パターン
+- イベントの発行はドメインロジック内で行う
+- イベント消費は外部（アプリケーション層）で行う
+- イベントはイミュータブルで履歴として保存可能 

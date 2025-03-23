@@ -1,0 +1,53 @@
+---
+description: REST APIコントローラーの基本実装
+globs: **/adapter/api/controller/*Controller.kt
+alwaysApply: false
+---
+# REST APIコントローラーの基本実装
+
+## 実装例
+```kotlin
+@RestController
+@RequestMapping("/api/users")
+class UserController(
+    private val createUserUseCase: CreateUserUseCase,
+    private val getUserUseCase: GetUserUseCase
+) {
+    @PostMapping
+    fun createUser(@RequestBody @Valid request: CreateUserRequest): ResponseEntity<Void> {
+        val command = CreateUserCommand(
+            email = request.email,
+            name = request.name,
+            age = request.age
+        )
+        
+        val userId = createUserUseCase.execute(command)
+        
+        return ResponseEntity
+            .created(URI.create("/api/users/${userId}"))
+            .build()
+    }
+    
+    @GetMapping("/{id}")
+    fun getUser(@PathVariable id: String): ResponseEntity<UserResponse> {
+        val query = GetUserQuery(id)
+        val userDto = getUserUseCase.execute(query)
+            ?: return ResponseEntity.notFound().build()
+            
+        return ResponseEntity.ok(UserResponse.from(userDto))
+    }
+}
+```
+
+## RESTエンドポイント設計
+| 操作 | HTTP動詞 | URL | ステータス |
+|-----|---------|-----|----------|
+| 作成 | POST | /api/users | 201 Created |
+| 取得 | GET | /api/users/{id} | 200 OK |
+| 更新 | PUT | /api/users/{id} | 200 OK |
+| 削除 | DELETE | /api/users/{id} | 204 No Content |
+
+## パターン
+- コントローラーは薄く保つ
+- ビジネスロジックはユースケースに委譲
+- リクエスト/レスポンスの変換に集中 

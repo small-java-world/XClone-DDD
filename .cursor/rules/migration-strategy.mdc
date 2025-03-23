@@ -1,61 +1,47 @@
 ---
-description: Flywayを使用したデータベースマイグレーション戦略
+description: Flywayマイグレーション戦略
 globs: **/db/migration/*.sql
 alwaysApply: false
 ---
-# データベースマイグレーション戦略
+# Flywayマイグレーション戦略
 
-## Flywayマイグレーションスクリプト
-
-### 命名規則
+## 命名規則
 ```
 V{バージョン番号}__{説明}.sql
 
 例:
-V1__create_initial_tables.sql
-V2__add_user_settings_table.sql
-V3__alter_posts_add_status_column.sql
+V1__create_users_table.sql
+V2__add_email_verification.sql
 ```
 
-### バージョニング戦略
-- シーケンシャルな番号付け（V1, V2, V3...）
-- タイムスタンプベース（V20230601123000...）
-- 機能ごとのプレフィックス（V1.1, V1.2, V2.1...）
-
-### マイグレーションスクリプト例
+## 実装例
 ```sql
--- V1__create_initial_tables.sql
+-- V1__create_users_table.sql
 CREATE TABLE users (
     id BINARY(16) PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
     email VARCHAR(100) NOT NULL UNIQUE,
-    password_hash VARCHAR(100) NOT NULL,
     status VARCHAR(20) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
-CREATE TABLE posts (
-    id BINARY(16) PRIMARY KEY,
-    user_id BINARY(16) NOT NULL,
-    content TEXT NOT NULL,
-    status VARCHAR(20) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-## マイグレーション適用タイミング
+## Spring Boot設定
+```yaml
+# application.yml
+spring:
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+```
 
-### 開発環境
-- アプリケーション起動時に自動適用（spring.flyway.locations=classpath:db/migration）
-- 手動実行: `./gradlew flywayMigrate`
+## 環境別適用戦略
+| 環境 | 適用方法 |
+|-----|---------|
+| 開発 | 自動適用 (アプリ起動時) |
+| テスト | テスト開始前に自動適用 |
+| 本番 | CI/CDパイプラインで適用 |
 
-### テスト環境
-- テスト開始前に自動適用
-- インメモリDBを使用する場合はテスト毎に初期化
-
-### 本番環境
-- デプロイプロセスの一部として実行
-- ダウンタイムの最小化のため、後方互換性のあるマイグレーションを原則とする 
+## アンチパターン
+❌ 既存データを破壊的に変更する
+❌ トランザクション考慮なしのマイグレーション 

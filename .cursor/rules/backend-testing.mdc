@@ -1,112 +1,364 @@
 ---
-description: バックエンドのテスト戦略と各レイヤーの役割
-globs: **/test/**/*.kt
+description: 
+globs: 
 alwaysApply: false
 ---
-# バックエンドテスト戦略ガイドライン
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# バックエンドユニットテストルール
 
-## ファイルパターン
+File patterns: **/test/**/*.kt
 
-各レイヤーのテストファイルは以下のパターンに従います：
+## 概要
 
-- ドメイン層: `**/src/test/kotlin/**/domain/**/*Test.kt`
-- アプリケーション層: `**/src/test/kotlin/**/application/**/*Test.kt`
-- コントローラー: `**/src/test/kotlin/**/adapter/rest/**/*Test.kt`
-- リポジトリ: `**/src/test/kotlin/**/adapter/persistence/repository/**/*Test.kt`
-- クエリサービス: `**/src/test/kotlin/**/adapter/persistence/query/**/*Test.kt`
+このルールはKotlin + Spring Bootバックエンドにおけるユニットテストの戦略を定義します。Kotestを活用した効果的なテスト実装により、コードの品質と保守性を高めます。
 
-## テストピラミッド
+## ユニットテスト共通原則
 
-バックエンドテストは以下のテストピラミッドに従います：
+1. **テスト駆動開発 (TDD)**: 可能な限り実装前にテストを記述します
+2. **単一責任**: 各テストケースは1つの機能または動作のみを検証します
+3. **独立性**: テストは互いに依存せず、任意の順序で実行可能であるべきです
+4. **再現性**: テストは毎回同じ結果を返すべきです
+5. **自己検証**: テストは自動的に成功または失敗を判定するべきです
 
-1. **単体テスト (Unit Tests)**
-   - ドメイン層のテスト: 外部依存なしの純粋なロジックテスト
-   - アプリケーション層のテスト: 外部依存をモック化してユースケースを検証
+## テストスタイル
 
-2. **サービステスト (Service Tests)**
-   - リポジトリのテスト: 実際のデータベースを使用して永続化の正確性を検証
-   - クエリサービスのテスト: 複雑なクエリの結果と性能を検証
+Kotestでは様々なテストスタイルが利用可能ですが、主に以下のスタイルを使用します：
 
-3. **API テスト (API Tests)**
-   - コントローラーのテスト: HTTPリクエスト/レスポンスを検証（依存はモック化）
+1. **DescribeSpec**: BDDスタイルのテストに適しており、特にドメインモデルのテストに推奨されます
+2. **FunSpec**: シンプルな関数スタイルのテストで、ユースケースやサービスのテストに適しています
 
-## レイヤー間の関係とモック境界
+```kotlin
+// DescribeSpecの例
+class EntitySpec : DescribeSpec({
+    describe("Entity") {
+        context("creation") {
+            it("should have valid initial state") {
+                val entity = Entity.create(EntityId.generate(), "name")
+                entity.isActive shouldBe true
+                entity.name shouldBe "name"
+            }
+            
+            it("should throw exception when name is empty") {
+                shouldThrow<IllegalArgumentException> {
+                    Entity.create(EntityId.generate(), "")
+                }
+            }
+        }
+    }
+})
+
+// FunSpecの例
+class CreateEntityUseCaseTest : FunSpec({
+    val mockRepository = mockk<EntityRepository>()
+    val useCase = CreateEntityUseCase(mockRepository)
+    
+    test("should create entity and save to repository") {
+        // Given
+        val command = CreateEntityCommand("testName")
+        val capturedEntity = slot<Entity>()
+        every { mockRepository.save(capture(capturedEntity)) } returns Entity.create(EntityId.generate(), "testName")
+        
+        // When
+        val result = useCase.execute(command)
+        
+        // Then
+        verify { mockRepository.save(any()) }
+        capturedEntity.captured.name shouldBe "testName"
+        result.id shouldNotBe null
+    }
+})
+```
+
+## テストの構造
+
+テストは次のように構成されます：
 
 ```
-[コントローラー層] → モック → [アプリケーション層] → モック → [ドメイン層リポジトリ]
-                                                 ↓
-                                         [ドメイン層モデル] → 実際のオブジェクト
-                                            
-[リポジトリ実装] → 実DB → [実テーブル]
+src/
+  main/
+    kotlin/
+      com/example/
+        domain/
+        application/
+        adapter/
+        infrastructure/
+  test/
+    kotlin/
+      com/example/
+        domain/        // ドメインレイヤーのテスト
+        application/   // アプリケーションレイヤーのテスト
+        adapter/       // アダプターレイヤーのテスト
+        infrastructure/ // インフラストラクチャレイヤーのテスト
 ```
 
-- コントローラーテスト: アプリケーション層（ユースケース）をモック化
-- アプリケーションテスト: リポジトリインターフェースをモック化、実際のドメインモデルを使用
-- ドメインテスト: 純粋なロジックテスト、モックなし
-- リポジトリテスト: 実際のデータベースに対するテスト、ドメインモデルは実オブジェクト
+## モックの使用方法
 
-## レイヤー別テストの役割と焦点
+テストでは依存関係をモック化するために[MockK](mdc:https:/mockk.io)を使用します。
 
-### 1. ドメイン層テスト
+```kotlin
+// モックの作成
+val repository = mockk<EntityRepository>()
 
-詳細は[ドメイン層テストルール](.cursor/rules/domain-testing.mdc)を参照してください。
+// 戻り値の指定
+every { repository.findById(any()) } returns Entity.create(EntityId.generate(), "test")
 
-**テスト焦点**:
-- ドメインモデルの不変条件
-- 値オブジェクトのバリデーション
-- エンティティの状態変更ロジック
-- ドメインサービスの協調動作
+// 例外をスローする指定
+every { repository.findById(EntityId.from(UUID.fromString("00000000-0000-0000-0000-000000000000"))) } throws EntityNotFoundException()
 
-### 2. アプリケーション層テスト
+// 引数のキャプチャ
+val entitySlot = slot<Entity>()
+every { repository.save(capture(entitySlot)) } answers { entitySlot.captured }
 
-詳細は[アプリケーション層テストルール](.cursor/rules/application-testing.mdc)を参照してください。
+// 呼び出し回数の検証
+verify(exactly = 1) { repository.save(any()) }
+verify { repository.delete(any()) wasNot Called }
+```
 
-**テスト焦点**:
-- ユースケースのビジネスフロー検証
-- 入力検証と例外ハンドリング
-- ドメインイベントの発行
-- トランザクション境界の正確性
+## レイヤー別テスト戦略
 
-### 3. コントローラーテスト
+### ドメインレイヤーテスト
 
-詳細は[コントローラーテストルール](.cursor/rules/controller-testing.mdc)を参照してください。
+ドメインレイヤーは厳格にテストする必要があります。外部依存関係をモック化せずに、純粋なドメインロジックをテストします。
 
-**テスト焦点**:
-- HTTPリクエスト/レスポンスの正確性
-- 入力バリデーション
-- 例外からHTTPステータスへの変換
-- セキュリティ権限の検証
+```kotlin
+class ValueObjectSpec : DescribeSpec({
+    describe("Email") {
+        it("should validate correct email format") {
+            shouldNotThrow<IllegalArgumentException> {
+                Email("test@example.com")
+            }
+        }
+        
+        it("should throw exception for invalid email") {
+            shouldThrow<IllegalArgumentException> {
+                Email("invalid-email")
+            }
+        }
+    }
+    
+    describe("Money") {
+        it("should correctly add amounts") {
+            val money1 = Money(100)
+            val money2 = Money(200)
+            val result = money1.add(money2)
+            result.amount shouldBe 300
+        }
+    }
+})
+```
 
-### 4. リポジトリテスト
+### アプリケーションレイヤーテスト
 
-詳細は[リポジトリテストルール](.cursor/rules/repository-testing.mdc)を参照してください。
+アプリケーションレイヤーでは、ビジネスルールが正しく適用されることをテストします。依存関係（リポジトリなど）はモック化します。
 
-**テスト焦点**:
-- データの永続化と読み取りの正確性
-- ドメインモデルとDBエンティティの正確な変換
-- 複雑なクエリの正確性
-- ライフサイクル管理（作成、更新、削除）
+```kotlin
+class CreateEntityUseCaseTest : FunSpec({
+    val mockRepository = mockk<EntityRepository>()
+    val mockEventPublisher = mockk<DomainEventPublisher>(relaxed = true)
+    val useCase = CreateEntityUseCase(mockRepository, mockEventPublisher)
+    
+    test("should create valid entity and publish event") {
+        // Given
+        val command = CreateEntityCommand("Test Entity")
+        every { mockRepository.save(any()) } returns Entity.create(EntityId.generate(), "Test Entity")
+        
+        // When
+        val result = useCase.execute(command)
+        
+        // Then
+        verify { 
+            mockRepository.save(any())
+            mockEventPublisher.publish(any<EntityCreatedEvent>())
+        }
+        result.name shouldBe "Test Entity"
+    }
+    
+    test("should throw exception for invalid command") {
+        // Given
+        val command = CreateEntityCommand("")
+        
+        // When/Then
+        shouldThrow<ValidationException> {
+            useCase.execute(command)
+        }
+        
+        verify { 
+            mockRepository wasNot Called
+            mockEventPublisher wasNot Called
+        }
+    }
+})
+```
 
-### 5. クエリサービステスト
+### アダプターレイヤーテスト
 
-詳細は[クエリサービステストルール](.cursor/rules/query-service-testing.mdc)を参照してください。
+#### リポジトリテスト
 
-**テスト焦点**:
-- 複雑な読み取りクエリの正確性
-- パフォーマンス検証
-- N+1問題の回避
-- 集計関数とジョインの検証
+リポジトリテストでは実際のデータベースアクセスを行います。テスト用のデータベースを使用し、事前に定義されたデータを投入してテストを実行します。
 
-## テストスコープの選定ガイド
+```kotlin
+@DataJpaTest
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+class EntityRepositoryImplTest : FunSpec({
+    lateinit var entityRepository: EntityRepository
+    lateinit var entityJpaRepository: EntityJpaRepository
+    
+    beforeSpec {
+        // テスト用データベースの準備
+        val database = resolve<DataSource>()
+        val flyway = Flyway.configure()
+            .dataSource(database)
+            .locations("classpath:db/migration", "classpath:db/testdata")
+            .load()
+        flyway.migrate()
+        
+        entityJpaRepository = resolve()
+        entityRepository = EntityRepositoryImpl(entityJpaRepository)
+    }
+    
+    test("should find entity by id") {
+        // テストデータが事前に投入されている前提
+        val id = EntityId.from(UUID.fromString("11111111-1111-1111-1111-111111111111"))
+        val entity = entityRepository.findById(id)
+        
+        entity shouldNotBe null
+        entity?.name shouldBe "Test Entity"
+    }
+    
+    test("should save new entity") {
+        val newEntity = Entity.create(EntityId.generate(), "New Entity")
+        val saved = entityRepository.save(newEntity)
+        
+        // 保存後の検証
+        val found = entityRepository.findById(saved.id)
+        found shouldNotBe null
+        found?.name shouldBe "New Entity"
+    }
+})
+```
 
-以下のガイドラインに従って、適切なテストスコープを選定してください：
+#### コントローラーテスト
 
-1. **単一ロジックのテスト**: ドメイン層テストを使用
-2. **複数コンポーネントの連携**: アプリケーション層テスト（依存をモック化）
-3. **HTTP APIの検証**: コントローラーテスト
-4. **データ永続化の検証**: リポジトリテスト
-5. **最適化された読み取りの検証**: クエリサービステスト
+コントローラーテストでは、HTTPリクエスト/レスポンスの変換が正しく行われることをテストします。ユースケースはモック化します。
+
+```kotlin
+@WebMvcTest(EntityController::class)
+class EntityControllerTest : FunSpec({
+    val mockUseCase = mockk<CreateEntityUseCase>()
+    
+    @Autowired
+    lateinit var mockMvc: MockMvc
+    
+    beforeTest {
+        clearAllMocks()
+    }
+    
+    test("should create entity") {
+        // Given
+        val request = CreateEntityRequest("Test Entity")
+        val responseDto = EntityResponseDto(
+            id = "11111111-1111-1111-1111-111111111111",
+            name = "Test Entity",
+            status = "ACTIVE"
+        )
+        every { mockUseCase.execute(any()) } returns responseDto
+        
+        // When/Then
+        mockMvc.post("/api/entities") {
+            contentType = MediaType.APPLICATION_JSON
+            content = objectMapper.writeValueAsString(request)
+        }.andExpect {
+            status { isCreated() }
+            content { contentType(MediaType.APPLICATION_JSON) }
+            jsonPath("$.id") { exists() }
+            jsonPath("$.name") { value("Test Entity") }
+        }
+        
+        verify { mockUseCase.execute(match { it.name == "Test Entity" }) }
+    }
+    
+    test("should return bad request for invalid input") {
+        // Given
+        val request = CreateEntityRequest("")
+        
+        // When/Then
+        mockMvc.post("/api/entities") {
+            contentType = MediaType.APPLICATION_JSON
+            content = objectMapper.writeValueAsString(request)
+        }.andExpect {
+            status { isBadRequest() }
+        }
+        
+        verify { mockUseCase wasNot Called }
+    }
+})
+```
+
+### インフラストラクチャレイヤーテスト
+
+設定クラスやユーティリティクラスなど、インフラストラクチャレイヤーのコンポーネントをテストします。
+
+```kotlin
+class DateUtilsTest : FunSpec({
+    test("should format date correctly") {
+        val date = LocalDate.of(2023, 1, 15)
+        val formatted = DateUtils.format(date)
+        formatted shouldBe "2023-01-15"
+    }
+    
+    test("should parse date correctly") {
+        val dateStr = "2023-01-15"
+        val parsed = DateUtils.parse(dateStr)
+        parsed shouldBe LocalDate.of(2023, 1, 15)
+    }
+})
+```
+
+## カバレッジ目標
+
+各レイヤーに対して、以下のコードカバレッジ目標を設定します：
+
+- ドメインレイヤー: 90%以上
+- アプリケーションレイヤー: 80%以上
+- アダプターレイヤー: 70%以上
+- インフラストラクチャレイヤー: 60%以上
+
+## テストデータの生成
+
+一貫したテストデータを作成するために、テストファクトリパターンを使用します。
+
+```kotlin
+object EntityTestFactory {
+    fun createEntity(
+        id: EntityId = EntityId.generate(),
+        name: String = "Test Entity",
+        status: EntityStatus = EntityStatus.ACTIVE
+    ): Entity {
+        return Entity(id, name, status)
+    }
+    
+    fun createEntityCommand(
+        name: String = "Test Entity"
+    ): CreateEntityCommand {
+        return CreateEntityCommand(name)
+    }
+}
+```
+
+## アンチパターン
+
+以下のようなアンチパターンは避けてください：
+
+1. **不安定なテスト**: 環境によって結果が変わるテスト（時間依存、ランダム値依存など）
+2. **過度なモック化**: テスト対象のクラス内部実装の詳細までモック化するテスト
+3. **テスト間の依存**: あるテストが別のテストの実行結果に依存するテスト
+4. **不十分なアサーション**: 例外が発生しないことだけをテストし、具体的な結果を検証しないテスト
+5. **高度に複雑なセットアップ**: 理解しづらい複雑なテスト準備コード
 
 ## まとめ
 
-バックエンドテスト戦略は各レイヤーの責務に合わせた適切なアプローチを採用します。テストピラミッドの原則に従い、下位レイヤーほど多くの詳細なテストを書き、上位レイヤーではより統合的な観点からテストします。各レイヤーのテストルールを参照して、適切なテスト手法を選択してください。 
+Kotestを使用したテストでは、ドメイン駆動設計と相性の良いテストスタイルと構造化されたアプローチを採用します。単一集約のリポジトリに対するテストには実際のデータベースを使用し、それ以外のコンポーネントでは適切にモックを活用します。各レイヤーに適したテスト戦略を採用することで、高品質なコードを維持し、安全なリファクタリングと変更を可能にします。 

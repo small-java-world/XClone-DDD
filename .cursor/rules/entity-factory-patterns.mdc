@@ -1,0 +1,48 @@
+---
+description: エンティティのファクトリメソッド実装パターン
+globs: **/domain/model/**/*Entity.kt
+alwaysApply: false
+---
+# エンティティのファクトリメソッドパターン
+
+## パターン
+- **create**: 新規エンティティの作成
+- **reconstruct**: リポジトリからのエンティティ再構築
+
+## 実装例
+```kotlin
+class User private constructor(
+    val id: UserId,
+    val email: Email,
+    val status: UserStatus,
+    val createdAt: CreatedAt,
+    val updatedAt: UpdatedAt
+) {
+    companion object {
+        // 新規作成用ファクトリメソッド
+        fun create(email: Email): User {
+            return User(
+                id = UserId.generate(),
+                email = email,
+                status = UserStatus.ACTIVE,
+                createdAt = CreatedAt.now(),
+                updatedAt = UpdatedAt.now()
+            )
+        }
+        
+        // リポジトリからの再構築用
+        fun reconstruct(
+            id: UserId,
+            email: Email,
+            status: UserStatus,
+            createdAt: CreatedAt,
+            updatedAt: UpdatedAt
+        ): User = User(id, email, status, createdAt, updatedAt)
+    }
+}
+```
+
+## アンチパターン
+❌ コンストラクタを公開する
+❌ IDを外部から注入する
+❌ 状態検証なしでオブジェクトを作成する 

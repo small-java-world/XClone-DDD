@@ -1,0 +1,50 @@
+---
+description: リクエスト/レスポンスモデルの設計
+globs: **/adapter/api/controller/*.kt
+alwaysApply: false
+---
+# リクエスト/レスポンスモデルの設計
+
+## リクエストモデル
+```kotlin
+data class CreateUserRequest(
+    @field:NotBlank(message = "メールアドレスは必須です")
+    @field:Email(message = "有効なメールアドレスを入力してください")
+    val email: String,
+    
+    @field:NotBlank(message = "名前は必須です")
+    val name: String,
+    
+    val age: Int?
+)
+```
+
+## レスポンスモデル
+```kotlin
+data class UserResponse(
+    val id: String,
+    val email: String,
+    val name: String,
+    val age: Int?,
+    val status: String,
+    val createdAt: Instant
+) {
+    companion object {
+        fun from(dto: UserDto): UserResponse {
+            return UserResponse(
+                id = dto.id,
+                email = dto.email,
+                name = dto.name,
+                age = dto.age,
+                status = dto.status,
+                createdAt = dto.createdAt
+            )
+        }
+    }
+}
+```
+
+## パターン
+- リクエストにはJakarta Validationを使用
+- レスポンスにはDTOからの変換メソッドを実装
+- 静的構造のみで振る舞いなし 

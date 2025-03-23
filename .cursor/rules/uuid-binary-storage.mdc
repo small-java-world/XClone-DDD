@@ -1,0 +1,41 @@
+---
+description: UUIDのバイナリ保存パターン
+globs: **/infrastructure/util/UuidUtil.kt
+alwaysApply: false
+---
+# UUIDのバイナリ保存パターン
+
+## パターン
+- UUIDをBINARY(16)として保存し、ストレージを節約
+- 変換ユーティリティを作成して一貫した変換を実現
+
+## 実装例
+```kotlin
+// UUIDをバイナリに変換するユーティリティ
+object UuidUtil {
+    fun uuidToBinary(uuid: UUID): ByteArray {
+        val buffer = ByteBuffer.wrap(ByteArray(16))
+        buffer.putLong(uuid.mostSignificantBits)
+        buffer.putLong(uuid.leastSignificantBits)
+        return buffer.array()
+    }
+    
+    fun binaryToUuid(bytes: ByteArray): UUID {
+        val buffer = ByteBuffer.wrap(bytes)
+        val high = buffer.getLong()
+        val low = buffer.getLong()
+        return UUID(high, low)
+    }
+}
+```
+
+## MySQL DDL例
+```sql
+CREATE TABLE users (
+    id BINARY(16) PRIMARY KEY,
+    -- 他のカラム
+);
+```
+
+## アンチパターン
+❌ 文字列としてUUIDを保存（36文字、インデックス非効率） 

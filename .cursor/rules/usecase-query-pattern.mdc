@@ -1,0 +1,36 @@
+---
+description: ユースケースのクエリパターン実装
+globs: **/application/usecase/**/*UseCase.kt
+alwaysApply: false
+---
+# ユースケースのクエリパターン実装
+
+## クエリオブジェクト
+```kotlin
+data class GetUserQuery(
+    val userId: String
+)
+```
+
+## ユースケース実装
+```kotlin
+@Service
+class GetUserUseCase(
+    private val userRepository: UserRepository
+) {
+    fun execute(query: GetUserQuery): UserDto? {
+        val userId = UserId.from(query.userId)
+        
+        return userRepository.findById(userId)
+            ?.let { UserDto.from(it) }
+    }
+}
+```
+
+## パターン
+| 戻り値タイプ | 用途 |
+|------------|------|
+| IDを返す | 作成系ユースケース |
+| DTOを返す | 参照系ユースケース |
+| Voidを返す | 更新/削除系ユースケース |
+| Booleanを返す | 確認系ユースケース | 

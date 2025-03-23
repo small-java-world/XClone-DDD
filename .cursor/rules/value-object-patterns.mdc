@@ -1,0 +1,33 @@
+---
+description: 値オブジェクト実装パターン
+globs: **/domain/model/**/*.kt
+alwaysApply: false
+---
+# 値オブジェクト実装パターン
+
+## 実装例
+```kotlin
+@JvmInline
+value class Email private constructor(val value: String) {
+    companion object {
+        fun from(value: String): Email {
+            require(value.matches(EMAIL_REGEX)) { "不正なメール形式です: $value" }
+            return Email(value)
+        }
+        
+        private val EMAIL_REGEX = Regex("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}")
+    }
+}
+```
+
+## パターン
+| パターン | 説明 |
+|---------|------|
+| プライベートコンストラクタ | インスタンス化を制御 |
+| ファクトリメソッド | バリデーション込みの生成 |
+| 不変性 | 値の変更を許可しない |
+| 等価性 | 値が同じなら同一と判断 |
+
+## アンチパターン
+❌ バリデーションなしで値を受け入れる
+❌ ミュータブル（可変）な値オブジェクト 
