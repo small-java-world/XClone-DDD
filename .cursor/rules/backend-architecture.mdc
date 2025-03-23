@@ -8,11 +8,6 @@ description:
 globs: 
 alwaysApply: false
 ---
----
-description: 
-globs: 
-alwaysApply: false
----
 # バックエンドのクリーンアーキテクチャとDDDの実装ガイドライン
 
 File patterns: **/*.kt
@@ -53,7 +48,13 @@ com.example.myapp
 │   │       ├── entity  # 集約ルート3関連エンティティ
 │   │       └── value   # 集約ルート3関連値オブジェクト
 │   ├── repository    # リポジトリインターフェース
+│   │   ├── [集約ルート1]  # 集約ルート1関連リポジトリ
+│   │   ├── [集約ルート2]  # 集約ルート2関連リポジトリ
+│   │   └── [集約ルート3]  # 集約ルート3関連リポジトリ
 │   └── service       # ドメインサービス
+│       ├── [集約ルート1]  # 集約ルート1関連サービス
+│       ├── [集約ルート2]  # 集約ルート2関連サービス
+│       └── [集約ルート3]  # 集約ルート3関連サービス
 ├── application       # アプリケーション層
 │   ├── usecase       # ユースケース
 │   │   ├── command   # コマンド型ユースケース
@@ -310,6 +311,13 @@ object UuidUtil {
     }
 }
 ```
+
+## データベースアクセス技術
+
+データベースアクセス技術（JPA、jOOQ、MyBatisなど）の選択と実装の詳細については、それぞれ以下のガイドラインを参照してください：
+
+- jOOQ: `.cursor/rules/jooq-rules.mdc`
+- Flyway: `.cursor/rules/migration-strategy.mdc`
 
 ## アンチパターン
 

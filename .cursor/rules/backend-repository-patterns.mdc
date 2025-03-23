@@ -1,34 +1,76 @@
 ---
 description: リポジトリパターンの実装とインターフェース設計
-globs: ["**/src/main/kotlin/**/domain/repository/*.kt", "**/src/main/kotlin/**/infrastructure/repository/*.kt"]
+globs: ["**/domain/repository/**/*.kt", "**/adapter/persistence/repository/**/*.kt"]
 alwaysApply: false
 ---
 # リポジトリパターンの実装とインターフェース設計
 
-## このルールの要約
-- リポジトリインターフェースはドメイン層に定義し、実装はインフラストラクチャ層に置く
-- CRUD操作の基本メソッドを提供する
-- 集約単位でリポジトリを作成する
-- トランザクション境界は集約単位で実装する
+## 適用シナリオ
+- リポジトリインターフェースは`domain/repository`に、実装は`adapter/persistence/repository`に配置する
+- ドメインモデルの永続化層とのやり取りを担当するリポジトリの実装
+- インターフェースの設計（ドメイン層）および実装（インフラ層）
+- 他のパターンより優先して適用すべき基盤パターン
 
-## リポジトリパターンの基本原則
+## 関連ルール
+- entity-factory-patterns: リポジトリで扱うエンティティの実装 (各集約ルート内の`entity`ディレクトリに配置)
+- value-object-patterns: IDなどの値オブジェクト (各集約ルートの`value`ディレクトリに配置)
+- uuid-binary-storage: UUIDのバイナリストレージ実装
+- usecase-command-pattern: リポジトリを使用したエンティティ操作
+- usecase-query-pattern: リポジトリを使用したデータ取得
 
-### 責任の分離
-- ドメイン層：リポジトリインターフェースを定義（どのようなデータ操作が必要か）
-- アダプター層：リポジトリ実装を提供（どのように永続化するか）
-- データベースの詳細はドメイン層から隠蔽する
+## クイックスタート
+- リポジトリインターフェースはドメイン層に定義、実装はインフラストラクチャ層
+- 基本メソッド: `findById`, `save`, `delete`, `findAll`
+- エンティティの集約単位で１つのリポジトリを作成
+- 実装には主にJOOQを使用
 
-### トランザクション境界
-- 集約（Aggregate）単位でリポジトリを設計
-- 複数の集約にまたがる操作はユースケース層で調整
+## 実装判断フロー
+1. どのエンティティのリポジトリ? → 集約ルートのみにリポジトリを作成
+2. どのような操作が必要? → 基本CRUD + 必要な検索メソッド
+3. 複雑な検索条件? → Specificationパターンまたはクエリサービス
 
-## リポジトリインターフェース設計
+## 最小限実装テンプレート
+```kotlin
+// ドメイン層: リポジトリインターフェース
+interface EntityRepository {
+    fun findById(id: EntityId): Entity?
+    fun save(entity: Entity): Entity
+    fun delete(id: EntityId)
+    fun findAll(): List<Entity>
+}
 
-### 命名規則
-- `[エンティティ名]Repository`: 例えば `EntityRepository`、`AggregateRootRepository`
+// インフラストラクチャ層: リポジトリ実装
+@Repository
+class EntityRepositoryImpl(
+    private val dsl: DSLContext
+) : EntityRepository {
+    
+    override fun findById(id: EntityId): Entity? {
+        val record = dsl.selectFrom(ENTITIES)
+            .where(ENTITIES.ID.eq(id.value()))
+            .fetchOne()
+        
+        return record?.let { mapToDomain(it) }
+    }
+    
+    override fun save(entity: Entity): Entity {
+        // 実装
+        return entity
+    }
+    
+    // 他のメソッド実装
+}
+```
+
+## 実装の主要決定ポイント
+- 単純な取得操作 → 基本リポジトリメソッド使用
+- 複雑な検索条件 → Specificationパターン追加
+- ページネーション必要 → Pageable引数追加
+- 複雑な読み取りクエリ → クエリサービスパターン使用
+
+## リポジトリの基本設計詳細
 
 ### 基本メソッド
-
 ```kotlin
 interface EntityRepository {
     // 単一エンティティの取得
@@ -48,72 +90,68 @@ interface EntityRepository {
 }
 ```
 
-### ページネーションと並べ替え
-
+### ページネーション対応（必要な場合）
 ```kotlin
-interface EntityRepository {
-    // ... 他のメソッド
-    
-    // ページネーション対応
-    fun findAll(pageable: Pageable): Page<Entity>
-    
-    // 検索条件とページネーション
-    fun findByStatus(status: EntityStatus, pageable: Pageable): Page<Entity>
-}
+fun findAll(pageable: Pageable): Page<Entity>
+fun findByStatus(status: EntityStatus, pageable: Pageable): Page<Entity>
 ```
 
-### 検索条件の扱い - Specification パターン
+## 複数ルール適用時の優先順位
+- リポジトリパターンはドメインオブジェクトのライフサイクル管理の基盤
+- 複雑な読み取りクエリは専用のクエリサービスに委譲する
+- 複数集約にまたがる操作はアプリケーション層で調整する
 
-複雑な検索条件は Specification パターンを使用して表現すると、柔軟な検索が可能になります。
+## 高度なパターン（必要に応じて）
 
+### Specificationパターン
+複雑な検索条件のために使用:
 ```kotlin
-interface EntityRepository {
-    // ... 他のメソッド
-    
-    // Specificationパターンを使用した検索
-    fun findBySpecification(spec: EntitySpecification): List<Entity>
-    fun findBySpecification(spec: EntitySpecification, pageable: Pageable): Page<Entity>
-}
+// リポジトリに追加
+fun findBySpecification(spec: EntitySpecification): List<Entity>
 
-// Specificationインターフェース
+// 実装例
 interface EntitySpecification {
     fun isSatisfiedBy(entity: Entity): Boolean
 }
 
-// 実装例
 class ActiveEntitySpecification : EntitySpecification {
     override fun isSatisfiedBy(entity: Entity): Boolean {
         return entity.status == EntityStatus.ACTIVE
     }
 }
+```
 
-class PriceRangeSpecification(private val min: Money, private val max: Money) : EntitySpecification {
-    override fun isSatisfiedBy(entity: Entity): Boolean {
-        return entity.price >= min && entity.price <= max
-    }
+### クエリサービスパターン
+複雑な読み取り操作を分離:
+```kotlin
+// 基本構造
+interface EntityQueryService {
+    fun findById(id: UUID): EntityDto?
+    fun findActiveEntities(pageable: Pageable): Page<EntityDto>
 }
 
-// 組み合わせ
-class AndSpecification(
-    private val left: EntitySpecification, 
-    private val right: EntitySpecification
-) : EntitySpecification {
-    override fun isSatisfiedBy(entity: Entity): Boolean {
-        return left.isSatisfiedBy(entity) && right.isSatisfiedBy(entity)
-    }
+@Service
+class EntityQueryServiceImpl(private val dsl: DSLContext) : EntityQueryService {
+    // 実装
 }
 ```
 
-## リポジトリ実装の原則
+## 実装チェックリスト
+- [ ] リポジトリインターフェースをドメイン層に作成
+- [ ] 基本メソッド（findById, save, delete, findAll）を定義
+- [ ] 必要に応じてカスタム検索メソッドを追加
+- [ ] インフラストラクチャ層に実装クラスを作成
+- [ ] マッピング処理を実装（データベース⇔ドメインモデル）
 
-### インフラストラクチャの関心事の分離
-- エンティティマッピング
-- SQL/ORM操作
-- トランザクション管理
-- キャッシュ管理
+## アンチパターン
+❌ リポジトリ実装をドメイン層に置く
+❌ エンティティ単位ではなくテーブル単位でリポジトリを設計
+❌ SQL文をリポジトリに直接ハードコード
+❌ 複数集約にまたがる操作をリポジトリ内で実行
 
-### jOOQを使用した実装例
+## 補足情報（詳細実装例）
 
+### JOOQ実装例
 ```kotlin
 @Repository
 class JooqEntityRepository(
@@ -140,240 +178,17 @@ class JooqEntityRepository(
             dsl.update(ENTITIES)
                 .set(ENTITIES.NAME, entity.name.value())
                 .set(ENTITIES.DESCRIPTION, entity.description.value())
-                // ... その他のフィールド
                 .set(ENTITIES.UPDATED_AT, entity.updatedAt.value())
                 .where(ENTITIES.ID.eq(id))
                 .execute()
         } else {
             dsl.insertInto(ENTITIES)
                 .set(ENTITIES.ID, id)
-                .set(ENTITIES.OWNER_ID, entity.ownerId.value())
                 .set(ENTITIES.NAME, entity.name.value())
-                // ... その他のフィールド
                 .execute()
         }
         
         return entity
-    }
-    
-    // ... その他のメソッド実装
-}
-```
-
-### クエリサービスパターン
-
-読み取り操作の最適化と関心事の分離のために、クエリサービスパターンを使用できます。このパターンでは、リポジトリは集約のライフサイクル管理に集中し、複雑な検索やレポートはクエリサービスが担当します。
-
-```kotlin
-// クエリサービスインターフェース
-interface EntityQueryService {
-    fun findById(id: UUID): EntityDto?
-    fun findActiveEntities(pageable: Pageable): Page<EntityDto>
-    fun findByOwnerAndPriceRange(ownerId: UUID, minPrice: BigDecimal, maxPrice: BigDecimal): List<EntityDto>
-    fun findTopSellingEntities(limit: Int): List<EntitySummaryDto>
-}
-
-// クエリサービスの実装
-@Service
-class EntityQueryServiceImpl(
-    private val dsl: DSLContext
-) : EntityQueryService {
-    
-    override fun findById(id: UUID): EntityDto? {
-        return dsl.select(
-                ENTITIES.ID,
-                ENTITIES.OWNER_ID,
-                ENTITIES.NAME,
-                ENTITIES.DESCRIPTION,
-                ENTITIES.PRICE,
-                ENTITIES.STATUS,
-                ENTITIES.CREATED_AT,
-                ENTITIES.UPDATED_AT,
-                OWNERS.NAME.`as`("owner_name")
-            )
-            .from(ENTITIES)
-            .join(OWNERS).on(ENTITIES.OWNER_ID.eq(OWNERS.ID))
-            .where(ENTITIES.ID.eq(id))
-            .fetchOneInto(EntityDto::class.java)
-    }
-    
-    override fun findActiveEntities(pageable: Pageable): Page<EntityDto> {
-        // ページネーション対応のクエリ実装
-        val query = dsl.select(
-                ENTITIES.ID,
-                ENTITIES.OWNER_ID,
-                ENTITIES.NAME,
-                ENTITIES.DESCRIPTION,
-                ENTITIES.PRICE,
-                ENTITIES.STATUS,
-                ENTITIES.CREATED_AT,
-                ENTITIES.UPDATED_AT,
-                OWNERS.NAME.`as`("owner_name")
-            )
-            .from(ENTITIES)
-            .join(OWNERS).on(ENTITIES.OWNER_ID.eq(OWNERS.ID))
-            .where(ENTITIES.STATUS.eq(EntityStatus.ACTIVE.name))
-        
-        // ページネーション処理
-        val total = dsl.selectCount().from(ENTITIES)
-            .where(ENTITIES.STATUS.eq(EntityStatus.ACTIVE.name))
-            .fetchOne(0, Long::class.java) ?: 0L
-        
-        val results = query
-            .orderBy(ENTITIES.CREATED_AT.desc())
-            .limit(pageable.pageSize)
-            .offset(pageable.offset)
-            .fetchInto(EntityDto::class.java)
-        
-        return PageImpl(results, pageable, total)
-    }
-    
-    override fun findByOwnerAndPriceRange(ownerId: UUID, minPrice: BigDecimal, maxPrice: BigDecimal): List<EntityDto> {
-        return dsl.select(
-                ENTITIES.ID,
-                ENTITIES.OWNER_ID,
-                ENTITIES.NAME,
-                ENTITIES.DESCRIPTION,
-                ENTITIES.PRICE,
-                ENTITIES.STATUS,
-                ENTITIES.CREATED_AT,
-                ENTITIES.UPDATED_AT,
-                OWNERS.NAME.`as`("owner_name")
-            )
-            .from(ENTITIES)
-            .join(OWNERS).on(ENTITIES.OWNER_ID.eq(OWNERS.ID))
-            .where(
-                ENTITIES.OWNER_ID.eq(ownerId)
-                .and(ENTITIES.PRICE.ge(minPrice))
-                .and(ENTITIES.PRICE.le(maxPrice))
-                .and(ENTITIES.STATUS.eq(EntityStatus.ACTIVE.name))
-            )
-            .orderBy(ENTITIES.PRICE.asc())
-            .fetchInto(EntityDto::class.java)
-    }
-    
-    override fun findTopSellingEntities(limit: Int): List<EntitySummaryDto> {
-        // 複雑な集計クエリ
-        return dsl.select(
-                ENTITIES.ID,
-                ENTITIES.NAME,
-                ENTITIES.PRICE,
-                DSL.count(ORDER_ITEMS.ID).`as`("sales_count"),
-                DSL.sum(ORDER_ITEMS.QUANTITY).`as`("total_quantity")
-            )
-            .from(ENTITIES)
-            .join(ORDER_ITEMS).on(ENTITIES.ID.eq(ORDER_ITEMS.ENTITY_ID))
-            .join(ORDERS).on(ORDER_ITEMS.ORDER_ID.eq(ORDERS.ID))
-            .where(ORDERS.STATUS.eq(OrderStatus.COMPLETED.name))
-            .groupBy(ENTITIES.ID, ENTITIES.NAME, ENTITIES.PRICE)
-            .orderBy(DSL.field("sales_count").desc())
-            .limit(limit)
-            .fetchInto(EntitySummaryDto::class.java)
-    }
-}
-
-// DTOクラス
-data class EntityDto(
-    val id: UUID,
-    val ownerId: UUID,
-    val name: String,
-    val description: String,
-    val price: BigDecimal,
-    val status: String,
-    val createdAt: Instant,
-    val updatedAt: Instant,
-    val ownerName: String? // 結合データ
-)
-
-data class EntitySummaryDto(
-    val id: UUID,
-    val name: String,
-    val price: BigDecimal,
-    val salesCount: Int,
-    val totalQuantity: Int
-)
-```
-
-### リポジトリとクエリサービスの使い分け
-
-- **リポジトリ**: 集約の整合性を保つ操作（作成、更新、削除）とIDによる取得に使用
-- **クエリサービス**: 複雑な検索条件、結合、集計を含むデータ取得に使用
-
-```kotlin
-@UseCase
-class CreateEntityUseCase(
-    private val entityRepository: EntityRepository
-) {
-    fun execute(command: CreateEntityCommand): EntityId {
-        // ドメインモデルを作成
-        val entity = Entity.create(/* パラメータ */)
-        
-        // リポジトリを使用して永続化
-        val savedEntity = entityRepository.save(entity)
-        
-        return savedEntity.id
-    }
-}
-
-@UseCase
-class FindEntitiesByOwnerAndPriceRangeUseCase(
-    private val entityQueryService: EntityQueryService
-) {
-    fun execute(query: FindEntitiesQuery): List<EntityDto> {
-        // クエリサービスを使用して検索
-        return entityQueryService.findByOwnerAndPriceRange(
-            query.ownerId,
-            query.minPrice,
-            query.maxPrice
-        )
-    }
-}
-```
-
-## テスト戦略
-
-### テスト用にモックリポジトリを使用
-
-```kotlin
-// インメモリリポジトリ実装（テスト用）
-class InMemoryEntityRepository : EntityRepository {
-    private val entities = ConcurrentHashMap<UUID, Entity>()
-    
-    override fun findById(id: EntityId): Entity? = entities[id.value()]
-    
-    override fun save(entity: Entity): Entity {
-        entities[entity.id.value()] = entity
-        return entity
-    }
-    
-    override fun delete(id: EntityId) {
-        entities.remove(id.value())
-    }
-    
-    // ... その他のメソッド実装
-}
-```
-
-### Spring Bootを使ったリポジトリの統合テスト
-
-```kotlin
-@DataJpaTest
-class EntityRepositoryTest {
-    @Autowired
-    private lateinit var entityJpaRepository: EntityJpaRepository
-    
-    private lateinit var entityRepository: EntityRepository
-    private lateinit var entityMapper: EntityMapper
-    
-    @BeforeEach
-    fun setup() {
-        entityMapper = EntityMapper()
-        entityRepository = JpaEntityRepository(entityJpaRepository, entityMapper)
-    }
-    
-    @Test
-    fun `save and find entity by id`() {
-        // テスト実装
     }
 }
 ``` 
