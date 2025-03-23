@@ -1,17 +1,17 @@
 ---
 description: エンティティのファクトリメソッド実装パターン
-globs: ["**/domain/model/**/*Entity.kt", "**/domain/model/**/*.kt", "!**/domain/model/value/*.kt", "!**/domain/model/**/value/*.kt"]
+globs: ["**/domain/model/entity/**/*.kt", "**/domain/model/aggregate/**/*.kt"]
 alwaysApply: false
 ---
 # エンティティのファクトリメソッドパターン
 
 ## 適用シナリオ
-- ドメインエンティティの生成ロジックのカプセル化
+- `domain/model/entity`または`domain/model/aggregate`に配置するエンティティの生成ロジックのカプセル化
 - 集約ルートの一貫性保証
 - リポジトリからのエンティティ再構築
 
 ## 関連ルール
-- value-object-patterns: エンティティが使用する値オブジェクト
+- value-object-patterns: エンティティが使用する値オブジェクト (`domain/model/value`に配置)
 - backend-repository-patterns: エンティティの永続化
 - uuid-id-type: エンティティIDの実装
 

@@ -1,18 +1,24 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: ユースケースのクエリパターン実装
-globs: ["**/application/usecase/**/*QueryUseCase.kt", "**/application/usecase/**/*GetUseCase.kt", "**/application/usecase/**/*FindUseCase.kt", "**/application/usecase/**/*SearchUseCase.kt"]
+globs: ["**/application/usecase/query/**/*.kt"]
 alwaysApply: false
 ---
 # ユースケースのクエリパターン実装
 
 ## 適用シナリオ
+- クエリ型ユースケースは`application/usecase/query`ディレクトリに配置する
 - エンティティの取得/検索/参照など、読み取り専用操作のユースケースに適用
 - 状態変更を伴うユースケースには適用しない（usecase-command-patternを使用）
 
 ## 関連ルール
-- usecase-command-pattern: 状態変更を伴うユースケース実装
+- usecase-command-pattern: 状態変更を伴うユースケース実装 (`application/usecase/command`に配置)
 - backend-repository-patterns: データ取得のためのリポジトリ
-- value-object-patterns: IDなどの値オブジェクト変換
+- value-object-patterns: IDなどの値オブジェクト変換 (`domain/model/value`に配置)
 
 ## クイックスタート
 - クエリは単純なデータホルダー（検索条件を保持）

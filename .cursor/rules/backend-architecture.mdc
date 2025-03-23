@@ -1,21 +1,16 @@
 ---
-description: Kotlin + Spring Bootを使用したバックエンドのクリーンアーキテクチャとDDDの実装ガイドライン
-globs: **/*.kt
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: 
+globs: 
 alwaysApply: false
 ---
 # バックエンドのクリーンアーキテクチャとDDDの実装ガイドライン
 
-## 実装方針
-
-このガイドラインは、AIがKotlin + Spring Bootを使用したバックエンドコードを生成・修正する際の一貫した方針を定義します。以下の原則に従ってください：
-
-1. **抽象度の一貫性**: 同じレイヤー内のコードは同じ抽象度レベルを保つ
-2. **命名の一貫性**: 類似したコンポーネントには類似した命名パターンを使用する
-3. **責務の明確化**: 各クラスは単一の責務を持ち、その責務を名前に反映させる
-4. **インターフェースファースト**: 実装よりもインターフェースを先に設計する
-5. **ドメインモデルの純粋性**: ドメインモデルはインフラストラクチャの詳細から独立させる
-
-これらの原則はファイルの詳細な内容よりも優先され、コード生成時や修正時の指針となります。
+File patterns: **/*.kt
 
 ## 概要
 
@@ -42,63 +37,263 @@ alwaysApply: false
 ```
 com.example.myapp
 ├── domain            # ドメイン層
-│   ├── model         # ドメインモデル（集約ルートごとにパッケージを作成）
+│   ├── model         # ドメインモデル
+│   │   ├── [集約ルート1]  # 集約ルート1
+│   │   ├── [集約ルート2]  # 集約ルート2
+│   │   └── [集約ルート3]  # 集約ルート3
 │   ├── repository    # リポジトリインターフェース
 │   └── service       # ドメインサービス
 ├── application       # アプリケーション層
-│   ├── usecase       # ユースケース（集約ルートごとにパッケージを作成）
+│   ├── usecase       # ユースケース
+│   │   ├── [集約ルート1]  # 集約ルート1関連ユースケース
+│   │   ├── [集約ルート2]  # 集約ルート2関連ユースケース
+│   │   └── [集約ルート3]  # 集約ルート3関連ユースケース
 │   └── dto           # Data Transfer Objects
 ├── adapter           # アダプター層
 │   ├── persistence   # 永続化アダプター
+│   │   ├── entity    # DB用エンティティ
+│   │   └── repository # リポジトリ実装
 │   ├── api           # API関連アダプター
+│   │   ├── controller # コントローラー
+│   │   └── request    # リクエストモデル
 │   └── external      # 外部サービスアダプター
 └── infrastructure    # インフラストラクチャ層
     ├── config        # 設定関連
-    └── security      # セキュリティ関連
+    ├── security      # セキュリティ関連
+    └── util          # ユーティリティ
 ```
 
-注: 集約ルートは実際のドメインに合わせて置き換えてください（例：product, order, customerなど）。
+注: `[集約ルート]` の部分は、実際のドメインに合わせて置き換えてください（例：product, order, customerなど）。
 
-## ドメイン層のパターン
+## ドメイン層の実装ガイドライン
 
 ### 値オブジェクト（Value Objects）
-- 不変で、等価性で比較される
-- ファクトリメソッドを使用して生成し、バリデーションを行う
-- 例: `EntityId`, `Email`, `Money`
+
+値オブジェクトは不変であり、等価性で比較されます。
+
+```kotlin
+// 良い例
+data class EntityId private constructor(val value: UUID) {
+    companion object {
+        fun generate(): EntityId = EntityId(UUID.randomUUID())
+        fun from(value: UUID): EntityId = EntityId(value)
+        fun from(value: String): EntityId = try {
+            EntityId(UUID.fromString(value))
+        } catch (e: IllegalArgumentException) {
+            throw IllegalArgumentException("Invalid EntityId format")
+        }
+    }
+}
+
+// 良い例
+data class Name private constructor(val value: String) {
+    companion object {
+        fun from(value: String): Name {
+            require(value.isNotBlank()) { "Name cannot be blank" }
+            require(value.length <= 100) { "Name cannot exceed 100 characters" }
+            return Name(value)
+        }
+    }
+}
+```
 
 ### エンティティ（Entities）
-- IDによって識別され、状態を変更できる
-- 不変条件をコンストラクタとメソッドで強制する
-- ドメインロジックをメソッドとして実装する
 
-### リポジトリインターフェース
-- ドメイン層で定義し、集約単位で設計する
-- 基本的なCRUD操作を提供する
-- 集約のライフサイクルを管理する
+エンティティはIDで識別され、状態を変更できます。
 
-## アプリケーション層のパターン
+```kotlin
+data class Entity(
+    val id: EntityId,
+    val ownerId: OwnerId,
+    val name: Name,
+    val attributes: List<AttributeId>,
+    val createdAt: CreatedAt,
+    val updatedAt: UpdatedAt,
+    val status: EntityStatus
+) {
+    fun update(newName: Name): Entity {
+        require(status == EntityStatus.ACTIVE) { "非アクティブなエンティティは更新できません" }
+        return copy(
+            name = newName,
+            updatedAt = UpdatedAt.now()
+        )
+    }
+    
+    fun deactivate(): Entity {
+        return copy(
+            status = EntityStatus.INACTIVE,
+            updatedAt = UpdatedAt.now()
+        )
+    }
+}
+```
 
-### ユースケース
-- 単一の責務を持ち、命名は「動詞+名詞+UseCase」形式
-- トランザクション境界を形成する
-- 入力はCommandまたはQuery、出力はDTOまたはIDとして定義
+### リポジトリインターフェース（Repository Interfaces）
 
-## アダプター層のパターン
+ドメイン層にリポジトリのインターフェースを定義します。
 
-### コントローラー
-- 入力のバリデーションを行い、ユースケースを呼び出す
-- 適切なHTTPステータスコードとレスポンスを返す
-- 例外をAPIレスポンスに変換する
+```kotlin
+interface EntityRepository {
+    fun save(entity: Entity): Entity
+    fun findById(id: EntityId): Entity?
+    fun findByOwnerId(ownerId: OwnerId, limit: Int, offset: Int): List<Entity>
+    fun delete(id: EntityId)
+}
+```
 
-### リポジトリ実装
-- ドメインオブジェクトとデータアクセスオブジェクトの変換を担当
-- インフラストラクチャの詳細（SQL、ORMなど）を隠蔽する
+## アプリケーション層の実装ガイドライン
 
-## インフラストラクチャ層のパターン
+### ユースケース（Use Cases）
 
-### 設定クラス
-- Spring Bootの設定を担当
-- セキュリティ、データベース、キャッシュなどの設定を行う
+各ユースケースは単一の責務を持ち、ドメインオブジェクトを操作します。
+
+```kotlin
+class CreateEntityUseCase(
+    private val entityRepository: EntityRepository,
+    private val attributeRepository: AttributeRepository,
+    private val notificationService: NotificationService
+) {
+    fun execute(command: CreateEntityCommand): EntityId {
+        // 属性の検証
+        val attributes = command.attributeIds?.let {
+            attributeRepository.validateAttributesExist(it)
+        } ?: emptyList()
+        
+        // エンティティの作成
+        val entity = Entity(
+            id = EntityId.generate(),
+            ownerId = command.ownerId,
+            name = Name.from(command.name),
+            attributes = attributes,
+            createdAt = CreatedAt.now(),
+            updatedAt = UpdatedAt.now(),
+            status = EntityStatus.ACTIVE
+        )
+        
+        // 保存
+        entityRepository.save(entity)
+        
+        // 通知
+        notificationService.notifyCreated(entity)
+        
+        return entity.id
+    }
+}
+
+data class CreateEntityCommand(
+    val ownerId: OwnerId,
+    val name: String,
+    val attributeIds: List<String>?
+)
+```
+
+## アダプター層の実装ガイドライン
+
+### APIコントローラー（API Controllers）
+
+コントローラーはHTTPリクエストを受け取り、ユースケースを呼び出します。
+
+```kotlin
+@RestController
+@RequestMapping("/api/entities")
+class EntityController(
+    private val createEntityUseCase: CreateEntityUseCase,
+    private val getEntityUseCase: GetEntityUseCase,
+    private val deleteEntityUseCase: DeleteEntityUseCase
+) {
+    @PostMapping
+    fun createEntity(@RequestBody request: CreateEntityRequest, authentication: Authentication): ResponseEntity<EntityResponse> {
+        val ownerId = OwnerId.from(authentication.name)
+        
+        val command = CreateEntityCommand(
+            ownerId = ownerId,
+            name = request.name,
+            attributeIds = request.attributeIds
+        )
+        
+        val entityId = createEntityUseCase.execute(command)
+        val entity = getEntityUseCase.execute(GetEntityQuery(entityId))
+        
+        return ResponseEntity.status(HttpStatus.CREATED).body(EntityResponse.from(entity))
+    }
+}
+```
+
+### リポジトリ実装（Repository Implementations）
+
+リポジトリの実装は、ドメインオブジェクトとデータベースエンティティの変換を担当します。
+
+```kotlin
+@Repository
+class EntityRepositoryImpl(
+    private val entityJpaRepository: EntityJpaRepository,
+    private val entityMapper: EntityMapper
+) : EntityRepository {
+    override fun save(entity: Entity): Entity {
+        val jpaEntity = entityMapper.toJpaEntity(entity)
+        val savedEntity = entityJpaRepository.save(jpaEntity)
+        return entityMapper.toDomain(savedEntity)
+    }
+    
+    override fun findById(id: EntityId): Entity? {
+        return entityJpaRepository.findById(id.value)
+            .map { entityMapper.toDomain(it) }
+            .orElse(null)
+    }
+}
+```
+
+## インフラストラクチャ層の実装ガイドライン
+
+### 設定クラス（Configuration Classes）
+
+Spring Bootの設定クラスはインフラストラクチャ層に配置します。
+
+```kotlin
+@Configuration
+@EnableWebSecurity
+class SecurityConfig(
+    private val authenticationProvider: AuthenticationProvider
+) {
+    @Bean
+    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+        return http
+            .csrf { it.disable() }
+            .authorizeHttpRequests { auth ->
+                auth
+                    .requestMatchers("/api/auth/**").permitAll()
+                    .anyRequest().authenticated()
+            }
+            .sessionManagement { session ->
+                session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            }
+            .authenticationProvider(authenticationProvider)
+            .build()
+    }
+}
+```
+
+### ユーティリティクラス（Utility Classes）
+
+共通のユーティリティもインフラストラクチャ層に配置します。
+
+```kotlin
+object UuidUtil {
+    fun uuidToBytes(uuid: UUID): ByteArray {
+        val buffer = ByteBuffer.wrap(ByteArray(16))
+        buffer.putLong(uuid.mostSignificantBits)
+        buffer.putLong(uuid.leastSignificantBits)
+        return buffer.array()
+    }
+    
+    fun bytesToUuid(bytes: ByteArray): UUID {
+        val buffer = ByteBuffer.wrap(bytes)
+        val high = buffer.getLong()
+        val low = buffer.getLong()
+        return UUID(high, low)
+    }
+}
+```
 
 ## アンチパターン
 
@@ -112,4 +307,4 @@ com.example.myapp
 
 ## まとめ
 
-クリーンアーキテクチャとDDDを組み合わせることで、ビジネスロジックを中心とした保守性の高いコードベースを実現できます。各レイヤーの責務を明確にし、依存関係の方向を適切に管理することが重要です。 
+クリーンアーキテクチャとDDDを組み合わせることで、ビジネスロジックに集中し、技術的な詳細から分離された、保守性の高いコードベースを実現できます。各レイヤーの責務を明確にし、依存関係の方向を適切に管理することが重要です。 

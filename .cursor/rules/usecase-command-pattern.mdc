@@ -1,18 +1,20 @@
 ---
 description: ユースケースのコマンドパターン実装
-globs: ["**/application/usecase/**/*CommandUseCase.kt", "**/application/usecase/**/*CreateUseCase.kt", "**/application/usecase/**/*UpdateUseCase.kt", "**/application/usecase/**/*DeleteUseCase.kt"]
+globs: ["**/application/usecase/command/**/*.kt"]
 alwaysApply: false
 ---
 # ユースケースのコマンドパターン実装
 
 ## 適用シナリオ
+- コマンド型ユースケースは`application/usecase/command`ディレクトリに配置する
 - エンティティの作成/更新/削除など、状態変更を伴うユースケースに適用
 - クエリ型ユースケースには適用しない（usecase-query-patternを使用）
 
 ## 関連ルール
-- usecase-query-pattern: 読み取り専用操作のユースケース実装
+- usecase-query-pattern: 読み取り専用操作のユースケース実装 (`application/usecase/query`に配置)
 - backend-repository-patterns: コマンドの結果を永続化するためのリポジトリ
-- value-object-patterns: コマンドからドメインオブジェクトへの変換
+- value-object-patterns: コマンドからドメインオブジェクトへの変換 (`domain/model/value`に配置)
+- entity-factory-patterns: コマンドからのエンティティ生成 (`domain/model/entity`に配置)
 
 ## クイックスタート
 - コマンドは単純なデータホルダー（入力値を保持するDTO）

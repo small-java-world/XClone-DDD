@@ -1,17 +1,18 @@
 ---
 description: 値オブジェクト実装パターン
-globs: ["**/domain/model/value/*.kt", "**/domain/model/**/value/*.kt", "**/*Id.kt", "**/*Name.kt", "**/*Status.kt"]
+globs: ["**/domain/model/value/**/*.kt"]
 alwaysApply: false
 ---
 # 値オブジェクト実装パターン
 
 ## 適用シナリオ
+- 値オブジェクトは全て`domain/model/value`ディレクトリに配置する
 - プリミティブ型をラップした値オブジェクトの実装
 - ID、名前、金額など、ビジネスルールを持つ値の表現
 - 不変性と自己検証が必要なオブジェクト
 
 ## 関連ルール
-- entity-factory-patterns: 値オブジェクトを使用するエンティティファクトリ
+- entity-factory-patterns: 値オブジェクトを使用するエンティティファクトリ (`domain/model/entity`に配置)
 - backend-repository-patterns: 値オブジェクトの永続化
 - uuid-id-type: ID型の値オブジェクト実装
 
@@ -96,4 +97,5 @@ value class Amount private constructor(val value: BigDecimal) {
 ❌ バリデーションなしで値を受け入れる
 ❌ ミュータブル（可変）な値オブジェクト 
 ❌ プリミティブ型をそのまま使用する
-❌ ビジネスルールの検証をクライアント側に委ねる 
+❌ ビジネスルールの検証をクライアント側に委ねる
+❌ 値オブジェクトを適切なディレクトリ(`domain/model/value`)以外に配置する 
