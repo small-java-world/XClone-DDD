@@ -1,11 +1,7 @@
 ---
-description: 
-globs: 
-alwaysApply: false
----
----
 description: フロントエンド環境変数管理ガイドライン
-globs: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/next.config.*", "**/package.json", "**/.env.*"]
+globs: **/*.ts, **/*.tsx, **/*.js, **/*.jsx, **/next.config.*, **/package.json, **/.env.*
+alwaysApply: false
 ---
 # フロントエンド環境変数管理ガイドライン
 

@@ -1,6 +1,6 @@
 ---
-description: 
-globs: 
+description: Gitブランチ戦略とコミットメッセージに関する規約
+globs: **/*
 alwaysApply: false
 ---
 # Gitブランチ戦略とコミットメッセージ規約

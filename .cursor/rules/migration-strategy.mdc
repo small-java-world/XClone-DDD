@@ -1,6 +1,6 @@
 ---
 description: Flywayマイグレーション戦略
-globs: ["**/db/migration/**/*.sql", "**/db/*/migration/**/*.sql"]
+globs: **/db/migration/**/*.sql, **/db/*/migration/**/*.sql
 alwaysApply: false
 ---
 # Flywayマイグレーション戦略
