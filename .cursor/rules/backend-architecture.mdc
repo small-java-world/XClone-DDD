@@ -82,30 +82,11 @@ com.example.myapp
 値オブジェクトは不変であり、等価性で比較されます。
 
 ```kotlin
-// 良い例
-data class EntityId private constructor(val value: UUID) {
-    companion object {
-        fun generate(): EntityId = EntityId(UUID.randomUUID())
-        fun from(value: UUID): EntityId = EntityId(value)
-        fun from(value: String): EntityId = try {
-            EntityId(UUID.fromString(value))
-        } catch (e: IllegalArgumentException) {
-            throw IllegalArgumentException("Invalid EntityId format")
-        }
-    }
-}
-
-// 良い例
-data class Name private constructor(val value: String) {
-    companion object {
-        fun from(value: String): Name {
-            require(value.isNotBlank()) { "Name cannot be blank" }
-            require(value.length <= 100) { "Name cannot exceed 100 characters" }
-            return Name(value)
-        }
-    }
-}
+// 基本実装例
+data class Name(val value: String)
 ```
+
+詳細な実装パターンは `.cursor/rules/value-object-patterns.mdc` を参照してください。
 
 ### エンティティ（Entities）
 
