@@ -1,413 +1,160 @@
 ---
-description: 
-globs: 
+description: UUIDの使用とデータベースでの最適化
+globs: ["**/src/main/kotlin/**/domain/model/**/*Id.kt", "**/src/main/kotlin/**/infrastructure/util/UuidUtil.kt"]
 alwaysApply: false
 ---
----
-description: UUID v7のバイナリ変換とインデックス最適化ガイド
-globs: ["**/domain/model/**/*.kt", "**/domain/model/**/*.java", "**/infrastructure/util/**/*.kt", "**/infrastructure/util/**/*.java"]
----
-# UUID v7のバイナリ変換とインデックス最適化ガイド
+# UUIDの使用とデータベースでの最適化
 
-このルールは、UUID version 7を主キーとして使用する際のバイナリ変換とインデックス最適化の方法を定義します。UUIDをそのままテキスト形式で保存するとパフォーマンスやストレージ効率の問題が生じるため、BINARY(16)形式で保存し、適切に最適化することが重要です。
+## UUIDの最適化
 
-## UUID version 7 の基本概念
+データベースパフォーマンスを考慮し、UUIDをBINARY(16)として保存する方式を採用します。
 
-UUID version 7は、時間ベースのUUIDであり、以下の特徴があります：
-
-1. **時間情報の埋め込み**：生成時のタイムスタンプが上位ビットに含まれる
-2. **単調増加**：同じノードで生成されたUUIDは時間順に並ぶ
-3. **ランダム性**：下位ビットにランダム値を含み、予測不可能性を確保
-
-これらの特性により、UUID v7は以下の点で優れています：
-
-- **インデックス効率**：時間順に並ぶため、B-treeインデックスの効率が良い
-- **時間情報の保持**：生成時刻を近似的に復元可能
-- **分散環境での一意性**：異なるノード間での衝突リスクが最小限
-
-## BINARY(16)形式でのUUID保存
-
-UUIDをデータベースに保存する際には、テキスト形式（36文字の文字列）ではなく、BINARY(16)形式（16バイトのバイナリデータ）を使用します。これにより以下の利点があります：
-
-1. **ストレージ効率**：16バイト vs 36バイト（テキスト形式）
-2. **インデックス効率**：固定長バイナリデータはインデックスに最適
-3. **パフォーマンス**：文字列比較よりバイナリ比較の方が高速
-
-### データベース定義例
-
-```sql
-CREATE TABLE users (
-    id BINARY(16) NOT NULL PRIMARY KEY,
-    username VARCHAR(50) NOT NULL UNIQUE,
-    email VARCHAR(255) NOT NULL UNIQUE,
-    -- その他のカラム
-    created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
-);
-
--- インデックス例
-CREATE INDEX idx_users_created_at ON users (created_at);
-```
-
-## タイムスタンプビットスワッピングによる最適化
-
-UUID v7の上位ビットにはタイムスタンプ情報が含まれますが、このビット順序はデータベースのインデックス効率を考慮すると最適ではありません。そこで、タイムスタンプビットを入れ替えることでインデックス効率を向上させます。
-
-### ビットスワッピングの目的
-
-MySQLやPostgreSQLなどのデータベースでは、主キーがクラスタ化インデックスとして機能します。連続的な値が効率的なディスク読み取りとキャッシュ利用につながります。しかし、UUIDはそのままでは連続値にならないため、タイムスタンプ部分を最初のバイトに配置するビットスワッピングを行います。
-
-### スワッピング実装
+### バイナリUUID変換ユーティリティ
 
 ```kotlin
-import java.nio.ByteBuffer
-import java.util.UUID
-
+// UUIDをバイナリに変換するユーティリティ
 object UuidUtil {
-    /**
-     * UUIDをバイナリに変換し、タイムスタンプ部分を最適化
-     */
-    fun uuidToOptimizedBytes(uuid: UUID): ByteArray {
+    fun uuidToBinary(uuid: UUID): ByteArray {
         val buffer = ByteBuffer.wrap(ByteArray(16))
-        
-        // タイムスタンプ部分（上位64ビット）とランダム部分（下位64ビット）を取得
-        val msb = uuid.mostSignificantBits
-        val lsb = uuid.leastSignificantBits
-        
-        // UUIDの上位64ビットと下位64ビットをそのまま保存
-        // （UUID v7では上位ビットにタイムスタンプが含まれる）
-        buffer.putLong(msb)
-        buffer.putLong(lsb)
-        
+        buffer.putLong(uuid.mostSignificantBits)
+        buffer.putLong(uuid.leastSignificantBits)
         return buffer.array()
     }
     
-    /**
-     * 最適化されたバイナリからUUIDに変換
-     */
-    fun bytesToUuid(bytes: ByteArray): UUID {
-        require(bytes.size == 16) { "UUIDのバイナリ表現は16バイトでなければなりません" }
-        
+    fun binaryToUuid(bytes: ByteArray): UUID {
         val buffer = ByteBuffer.wrap(bytes)
-        val msb = buffer.getLong()
-        val lsb = buffer.getLong()
-        
-        return UUID(msb, lsb)
+        val high = buffer.getLong()
+        val low = buffer.getLong()
+        return UUID(high, low)
     }
 }
 ```
 
-## UUID v7の生成
+### MySQL DDL例
 
-時間ベースのUUID v7を生成するには、専用のライブラリを使用するか、自前で実装します。
+```sql
+CREATE TABLE entities (
+    id BINARY(16) PRIMARY KEY,
+    attribute VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    status VARCHAR(20) NOT NULL
+);
+```
 
-### ライブラリを使用した生成方法
+### JDBCでの扱い方
 
 ```kotlin
-// build.gradle.kts
-dependencies {
-    implementation("com.github.f4b6a3:uuid-creator:5.3.0")
-}
+// JDBC PreparedStatementでの設定
+preparedStatement.setBytes(1, uuidToBinary(entity.id.value))
 
-// UuidGenerator.kt
-import com.github.f4b6a3.uuid.UuidCreator
-
-object UuidGenerator {
-    /**
-     * UUID version 7を生成
-     */
-    fun generateV7(): UUID {
-        return UuidCreator.getTimeOrderedEpoch()
-    }
-    
-    /**
-     * UUID version 7を生成し、最適化されたバイナリに変換
-     */
-    fun generateV7AsBytes(): ByteArray {
-        val uuid = generateV7()
-        return UuidUtil.uuidToOptimizedBytes(uuid)
-    }
-}
+// ResultSetからの取得
+val id = binaryToUuid(resultSet.getBytes("id"))
 ```
 
-### 自前実装例
-
-UUID v7の仕様に基づいた独自実装（RFC 4122をベースにした実装例）：
+### jOOQでの扱い方
 
 ```kotlin
-import java.nio.ByteBuffer
-import java.time.Instant
-import java.util.Random
-import java.util.UUID
-import java.util.concurrent.atomic.AtomicInteger
+// jOOQ INSERT
+dslContext.insertInto(ENTITY_TABLE)
+    .set(ENTITY_TABLE.ID, uuidToBinary(entity.id.value))
+    .set(ENTITY_TABLE.NAME, entity.name.value)
+    // 他のフィールド...
+    .execute()
 
-object UuidV7Generator {
-    private val random = Random()
-    private val counter = AtomicInteger(random.nextInt())
-    
-    /**
-     * UUID version 7を生成
-     */
-    fun generate(): UUID {
-        val now = Instant.now()
-        val timestamp = now.toEpochMilli()
-        
-        // タイムスタンプの上位48ビットを取得
-        val timeHigh = (timestamp shr 16) and 0xFFFFFFFFFFFFL
-        // タイムスタンプの下位16ビットを取得
-        val timeLow = timestamp and 0xFFFFL
-        
-        // 単調増加するカウンターから12ビット取得
-        val seq = (counter.getAndIncrement() and 0xFFF)
-        
-        // ランダム値（下位ビット）
-        val rand = random.nextLong() and 0xFFFFFFFFFFFFL
-        
-        // UUIDのバージョンとバリアントビットを設定
-        val msb = (timeHigh shl 16) or timeLow
-        val lsb = ((seq.toLong() shl 48) | (rand and 0x0FFFFFFFFFFF)) or 0x8000000000000000L
-        
-        // バージョン7のビットを設定
-        val msbWithVersion = (msb and 0xFFFFFFFFFFFF0FFFL) or 0x0000000000007000L
-        
-        return UUID(msbWithVersion, lsb)
+// jOOQ SELECT
+dslContext.selectFrom(ENTITY_TABLE)
+    .where(ENTITY_TABLE.ID.eq(uuidToBinary(id.value)))
+    .fetchOne()
+    ?.let { record ->
+        val entityId = binaryToUuid(record.get(ENTITY_TABLE.ID))
+        // エンティティの再構築...
     }
-    
-    /**
-     * UUID version 7を生成し、最適化されたバイナリに変換
-     */
-    fun generateAsBytes(): ByteArray {
-        val uuid = generate()
-        return UuidUtil.uuidToOptimizedBytes(uuid)
-    }
-}
 ```
 
-## 値オブジェクトでのラッピング
+## ID値オブジェクトの実装
 
-UUIDを直接使用するのではなく、ドメインの値オブジェクトとしてラップすることを推奨します。
+エンティティIDは値オブジェクトとして実装し、型安全性を確保します。
 
 ```kotlin
 @JvmInline
-value class UserId private constructor(private val value: UUID) {
+value class EntityId private constructor(val value: UUID) {
     companion object {
-        fun generate(): UserId = UserId(UuidGenerator.generateV7())
-        fun from(value: UUID): UserId = UserId(value)
-        fun from(value: String): UserId = UserId(UUID.fromString(value))
-        fun fromBytes(bytes: ByteArray): UserId = UserId(UuidUtil.bytesToUuid(bytes))
+        fun from(value: String): EntityId {
+            return try {
+                EntityId(UUID.fromString(value))
+            } catch (e: IllegalArgumentException) {
+                throw IllegalArgumentException("不正なID形式です: $value", e)
+            }
+        }
+        
+        fun from(value: UUID): EntityId {
+            return EntityId(value)
+        }
+        
+        fun generate(): EntityId {
+            return EntityId(UUID.randomUUID())
+        }
     }
     
-    fun value(): UUID = value
-    fun toBytes(): ByteArray = UuidUtil.uuidToOptimizedBytes(value)
     override fun toString(): String = value.toString()
 }
 ```
 
-## リポジトリでのUUID変換
+## 時系列UUIDの使用
 
-リポジトリ実装では、ドメインのIDとデータベースのバイナリ表現の間で変換する必要があります：
-
-```kotlin
-@Repository
-class UserRepositoryImpl(private val jdbcTemplate: JdbcTemplate) : UserRepository {
-    
-    override fun findById(id: UserId): User? {
-        val sql = "SELECT * FROM users WHERE id = ?"
-        
-        try {
-            return jdbcTemplate.queryForObject(sql, { rs, _ ->
-                mapRowToUser(rs)
-            }, id.toBytes())
-        } catch (e: EmptyResultDataAccessException) {
-            return null
-        }
-    }
-    
-    override fun save(user: User): User {
-        val existingUser = findById(user.id)
-        
-        if (existingUser != null) {
-            // 更新処理
-            val sql = """
-                UPDATE users 
-                SET username = ?, email = ?, display_name = ?, profile_image_url = ?, 
-                    bio = ?, status = ?, updated_at = ? 
-                WHERE id = ?
-            """.trimIndent()
-            
-            jdbcTemplate.update(sql,
-                user.username.value(),
-                user.email.value(),
-                user.displayName.value(),
-                user.profileImageUrl?.value(),
-                user.bio?.value(),
-                user.status.name,
-                user.updatedAt.value(),
-                user.id.toBytes()
-            )
-        } else {
-            // 挿入処理
-            val sql = """
-                INSERT INTO users 
-                (id, username, email, password_hash, display_name, profile_image_url, 
-                bio, status, created_at, updated_at) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """.trimIndent()
-            
-            jdbcTemplate.update(sql,
-                user.id.toBytes(),
-                user.username.value(),
-                user.email.value(),
-                user.passwordHash.value(),
-                user.displayName.value(),
-                user.profileImageUrl?.value(),
-                user.bio?.value(),
-                user.status.name,
-                user.createdAt.value(),
-                user.updatedAt.value()
-            )
-        }
-        
-        return user
-    }
-    
-    private fun mapRowToUser(rs: ResultSet): User {
-        return User(
-            id = UserId.fromBytes(rs.getBytes("id")),
-            username = Username.from(rs.getString("username")),
-            email = EmailAddress.from(rs.getString("email")),
-            passwordHash = PasswordHash.from(rs.getString("password_hash")),
-            displayName = DisplayName.from(rs.getString("display_name")),
-            profileImageUrl = rs.getString("profile_image_url")?.let { ProfileImageUrl.from(it) },
-            bio = rs.getString("bio")?.let { UserBio.from(it) },
-            status = UserStatus.valueOf(rs.getString("status")),
-            createdAt = CreatedAt.from(rs.getTimestamp("created_at").toInstant()),
-            updatedAt = UpdatedAt.from(rs.getTimestamp("updated_at").toInstant())
-        )
-    }
-}
-```
-
-## Springフレームワークとの統合
-
-Spring Data JPAを使用する場合、JPA Entity と UUID の変換を適切に処理する必要があります：
+タイムスタンプベースのUUIDを使用することで、インデックス効率を向上させることができます。
 
 ```kotlin
-// JPA Entity
-@Entity
-@Table(name = "users")
-class UserEntity(
-    @Id
-    @Column(name = "id", columnDefinition = "BINARY(16)")
-    var id: UUID,
+object TimeBasedUuidGenerator {
+    private val NODE_ID = randomNodeId()
+    private val clock = Clockseq()
     
-    @Column(name = "username", nullable = false, unique = true)
-    var username: String,
-    
-    // その他のフィールド
-)
-
-// カスタムコンバーター
-@Converter(autoApply = true)
-class UuidToBinaryConverter : AttributeConverter<UUID, ByteArray> {
-    override fun convertToDatabaseColumn(attribute: UUID?): ByteArray? {
-        return attribute?.let { UuidUtil.uuidToOptimizedBytes(it) }
+    fun generate(): UUID {
+        val timeMillis = System.currentTimeMillis()
+        val clockSeq = clock.nextVal()
+        return generateUUID(timeMillis, clockSeq, NODE_ID)
     }
     
-    override fun convertToEntityAttribute(dbData: ByteArray?): UUID? {
-        return dbData?.let { UuidUtil.bytesToUuid(it) }
+    private fun generateUUID(timeMillis: Long, clockSeq: Int, node: ByteArray): UUID {
+        val msb = ((timeMillis & 0xFFFFFFFFL) << 32) or
+                 ((timeMillis & 0xFFFF00000000L) shr 16) or
+                 0x1000 or
+                 ((timeMillis & 0xFFF000000000000L) shr 48)
+        
+        val lsb = (clockSeq.toLong() << 48) or node.let {
+            var nodeVal = 0L
+            for (i in 0..5) {
+                nodeVal = (nodeVal << 8) | (it[i].toLong() and 0xFF)
+            }
+            nodeVal
+        }
+        
+        return UUID(msb, lsb)
+    }
+    
+    private fun randomNodeId(): ByteArray {
+        val rnd = Random()
+        val nodeId = ByteArray(6)
+        rnd.nextBytes(nodeId)
+        nodeId[0] = (nodeId[0].toInt() or 0x01).toByte() // マルチキャストビットを設定
+        return nodeId
+    }
+    
+    private class Clockseq {
+        @Volatile
+        private var sequence = Random().nextInt(0xFFFF)
+        
+        fun nextVal(): Int {
+            return sequence++ and 0x3FFF // 14ビットに制限
+        }
     }
 }
-
-// リポジトリ実装
-@Repository
-class JpaUserRepositoryImpl(
-    private val userJpaRepository: UserJpaRepository,
-    private val userMapper: UserMapper
-) : UserRepository {
-    
-    override fun findById(id: UserId): User? {
-        return userJpaRepository.findById(id.value())
-            .map { userMapper.toDomain(it) }
-            .orElse(null)
-    }
-    
-    // その他のメソッド実装
-}
 ```
-
-## クライアントサイドでのUUID処理
-
-APIのクライアント側（フロントエンド）では、UUIDを文字列として扱います：
-
-```typescript
-// TypeScript例（フロントエンドでのUUID処理）
-interface User {
-  id: string; // UUIDは文字列として扱う
-  username: string;
-  displayName: string;
-  // その他のプロパティ
-}
-
-// APIからユーザーを取得する例
-async function fetchUser(userId: string): Promise<User> {
-  const response = await fetch(`/api/users/${userId}`);
-  if (!response.ok) {
-    throw new Error('ユーザーの取得に失敗しました');
-  }
-  return response.json();
-}
-```
-
-## パフォーマンス最適化のベストプラクティス
-
-1. **バッチ処理での大量データ読み込み**
-   - ID順（タイムスタンプ順）での読み込みが効率的
-   - ページング処理を実装する際は、最後に読み込んだIDを基準にする方法が効率的
-
-2. **インデックス設計**
-   - 主キー（ID）のクラスタ化インデックスを活用
-   - 複合インデックスでは、主キーを最後に配置することが多い
-
-3. **参照整合性制約**
-   - 外部キー制約を適切に設定
-   - BINARY(16)型の主キーと外部キーの一貫した使用
-
-4. **アプリケーションレベルでのキャッシュ**
-   - 頻繁にアクセスされるエンティティをIDベースでキャッシュ
-
-## よくある問題と解決策
-
-### 問題1: データベース間でのUUID表現の違い
-
-異なるデータベース製品ではUUIDのバイナリ表現が異なる場合があります。
-
-**解決策**: アプリケーション層で一貫した変換ロジックを使用し、データベース固有の実装に依存しない。
-
-### 問題2: データベースのクエリツールでのUUID表示
-
-バイナリ形式で保存されたUUIDは、データベース管理ツールで読みにくい形式で表示されます。
-
-**解決策**: 
-```sql
--- MySQL
-SELECT BIN_TO_UUID(id) as id_readable, * FROM users;
-
--- PostgreSQL
-SELECT encode(id, 'hex') as id_hex, * FROM users;
-```
-
-### 問題3: JDBCとORMでのタイプマッピングの不一致
-
-JDBCとORMツール間でのUUID-バイナリ変換の不一致が発生することがあります。
-
-**解決策**: カスタムコンバータを使用して明示的に変換ロジックを定義する。
 
 ## まとめ
 
-UUID v7をBINARY(16)形式で保存し、タイムスタンプビットスワッピングによる最適化を行うことで、以下の利点があります：
-
-1. **ストレージ効率**：UUIDを16バイトで保存
-2. **インデックス効率**：時間ベースでの並び順でインデックス効率を向上
-3. **アプリケーション設計の簡素化**：シーケンシャルIDと同等の効率性と分散システムでの利点を両立
-4. **将来の拡張性**：UUIDの特性により、システムの水平スケーリングが容易 
+- UUIDはBINARY(16)として保存することでストレージを最適化
+- タイムスタンプベースのUUIDを使用してインデックス効率を向上
+- 値オブジェクトとしてID型を実装し型安全性を確保
+- UUIDの変換ユーティリティを用意して一貫した処理を実現 

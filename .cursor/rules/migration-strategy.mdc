@@ -1,0 +1,61 @@
+---
+description: Flywayを使用したデータベースマイグレーション戦略
+globs: **/db/migration/*.sql
+alwaysApply: false
+---
+# データベースマイグレーション戦略
+
+## Flywayマイグレーションスクリプト
+
+### 命名規則
+```
+V{バージョン番号}__{説明}.sql
+
+例:
+V1__create_initial_tables.sql
+V2__add_user_settings_table.sql
+V3__alter_posts_add_status_column.sql
+```
+
+### バージョニング戦略
+- シーケンシャルな番号付け（V1, V2, V3...）
+- タイムスタンプベース（V20230601123000...）
+- 機能ごとのプレフィックス（V1.1, V1.2, V2.1...）
+
+### マイグレーションスクリプト例
+```sql
+-- V1__create_initial_tables.sql
+CREATE TABLE users (
+    id BINARY(16) PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    password_hash VARCHAR(100) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE posts (
+    id BINARY(16) PRIMARY KEY,
+    user_id BINARY(16) NOT NULL,
+    content TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+```
+
+## マイグレーション適用タイミング
+
+### 開発環境
+- アプリケーション起動時に自動適用（spring.flyway.locations=classpath:db/migration）
+- 手動実行: `./gradlew flywayMigrate`
+
+### テスト環境
+- テスト開始前に自動適用
+- インメモリDBを使用する場合はテスト毎に初期化
+
+### 本番環境
+- デプロイプロセスの一部として実行
+- ダウンタイムの最小化のため、後方互換性のあるマイグレーションを原則とする 

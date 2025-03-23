@@ -11,6 +11,108 @@ globs: ["**/application/usecase/**/*.kt", "**/application/usecase/**/*.java"]
 
 このルールは、アプリケーション層におけるユースケースクラスの命名規則と単一責務の原則（SRP）の適用方法を定義します。ユースケースはアプリケーションの機能を実現するためのロジックをカプセル化し、ドメイン層とインターフェース層の間の橋渡しをします。
 
+## コマンドオブジェクト設計
+
+ユースケースへの入力はコマンドオブジェクトとして設計します。
+
+```kotlin
+// コマンドオブジェクト
+data class CreateEntityCommand(
+    val param1: String,
+    val param2: String,
+    val param3: Int?
+)
+
+// ユースケースクラス
+class CreateEntityUseCase(
+    private val entityRepository: EntityRepository,
+    private val transactionManager: TransactionManager
+) {
+    fun execute(command: CreateEntityCommand): EntityId {
+        // コマンドから値オブジェクトへの変換
+        val param1 = Param1.from(command.param1)
+        val param2 = Param2.from(command.param2)
+        val param3 = command.param3?.let { Param3.from(it) }
+        
+        // ドメインロジックの実行
+        // ...
+    }
+}
+```
+
+### コマンドオブジェクトの特徴
+
+1. **不変性**: データ変更不可能なimmutableオブジェクト
+2. **単純なデータ構造**: 基本型またはプリミティブの集合
+3. **バリデーションなし**: バリデーションはユースケース内で行う
+4. **ドメイン知識なし**: ドメインモデルに依存しない
+
+## トランザクション境界
+
+ユースケースはトランザクション境界を形成します。
+
+```kotlin
+interface TransactionManager {
+    fun <T> execute(block: () -> T): T
+}
+
+// Spring実装例
+@Component
+class SpringTransactionManager(
+    private val transactionTemplate: TransactionTemplate
+) : TransactionManager {
+    override fun <T> execute(block: () -> T): T {
+        return transactionTemplate.execute {
+            block()
+        } as T
+    }
+}
+
+// ユースケースでの使用
+class CreateEntityUseCase(
+    private val entityRepository: EntityRepository,
+    private val transactionManager: TransactionManager
+) {
+    fun execute(command: CreateEntityCommand): EntityId {
+        return transactionManager.execute {
+            // トランザクション内の処理
+            val entity = Entity.create(
+                param1 = Param1.from(command.param1),
+                param2 = Param2.from(command.param2)
+            )
+            
+            entityRepository.save(entity)
+            
+            entity.id
+        }
+    }
+}
+```
+
+## 戻り値型の使い分け
+
+ユースケースの戻り値型は、操作の性質に応じて以下のように使い分けます：
+
+1. **IDを返す**: 作成系ユースケース
+   ```kotlin
+   fun execute(command: CreateEntityCommand): EntityId
+   ```
+
+2. **DTOを返す**: 参照系ユースケース
+   ```kotlin
+   fun execute(query: GetEntityQuery): EntityDto?
+   ```
+
+3. **Voidを返す**: 更新/削除系ユースケース
+   ```kotlin
+   fun execute(command: DeleteEntityCommand)
+   ```
+
+4. **Booleanを返す**: 確認系ユースケース
+   ```kotlin
+   fun execute(query: CheckEntityExistsQuery): Boolean
+   ```
+
 ## ユースケースの基本原則
 
 ### 単一責務の原則（SRP）
