@@ -1,6 +1,6 @@
 ---
 description: Flywayマイグレーション戦略
-globs: **/db/migration/*.sql
+globs: ["**/db/migration/**/*.sql", "**/db/*/migration/**/*.sql"]
 alwaysApply: false
 ---
 # Flywayマイグレーション戦略
@@ -14,6 +14,23 @@ V1__create_users_table.sql
 V2__add_email_verification.sql
 ```
 
+## ディレクトリ構造（複数DB対応）
+```
+src/main/resources/
+├── db/
+│   ├── migration/        # デフォルトDB用
+│   │   ├── V1__create_users_table.sql
+│   │   └── V2__add_email_verification.sql
+│   ├── maindb/           # メインDB用
+│   │   └── migration/
+│   │       ├── V1__create_main_tables.sql
+│   │       └── V2__add_main_indexes.sql
+│   └── legacydb/         # レガシーDB用
+│       └── migration/
+│           ├── V1__create_legacy_tables.sql
+│           └── V2__update_legacy_schema.sql
+```
+
 ## 実装例
 ```sql
 -- V1__create_users_table.sql
@@ -25,7 +42,7 @@ CREATE TABLE users (
 );
 ```
 
-## Spring Boot設定
+## Spring Boot設定（単一DB）
 ```yaml
 # application.yml
 spring:
@@ -33,6 +50,62 @@ spring:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
+```
+
+## Spring Boot設定（複数DB）
+```yaml
+# application.yml
+spring:
+  # デフォルトDB
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+  
+  # 追加のデータソース設定
+  datasource:
+    main:
+      url: ${MAIN_DB_URL}
+      username: ${MAIN_DB_USERNAME}
+      password: ${MAIN_DB_PASSWORD}
+    legacy:
+      url: ${LEGACY_DB_URL}
+      username: ${LEGACY_DB_USERNAME}
+      password: ${LEGACY_DB_PASSWORD}
+
+# Java設定クラスで追加のFlywayインスタンスを構成
+```
+
+## 複数DBのFlywayセットアップ
+```kotlin
+@Configuration
+class FlywayConfig {
+    @Bean
+    fun mainDbFlyway(
+        @Qualifier("mainDataSource") dataSource: DataSource
+    ): Flyway {
+        return Flyway.configure()
+            .dataSource(dataSource)
+            .locations("classpath:db/maindb/migration")
+            .load()
+    }
+
+    @Bean
+    fun legacyDbFlyway(
+        @Qualifier("legacyDataSource") dataSource: DataSource
+    ): Flyway {
+        return Flyway.configure()
+            .dataSource(dataSource)
+            .locations("classpath:db/legacydb/migration")
+            .load()
+    }
+
+    @PostConstruct
+    fun migrateFlyway() {
+        mainDbFlyway.migrate()
+        legacyDbFlyway.migrate()
+    }
+}
 ```
 
 ## 環境別適用戦略
@@ -44,4 +117,5 @@ spring:
 
 ## アンチパターン
 ❌ 既存データを破壊的に変更する
-❌ トランザクション考慮なしのマイグレーション 
+❌ トランザクション考慮なしのマイグレーション
+❌ 複数DBを使用する場合に単一のmigrationディレクトリに混在させる 

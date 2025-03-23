@@ -4,13 +4,11 @@ globs:
 alwaysApply: false
 ---
 ---
-description: jOOQを使用した型安全なSQLクエリ構築のルールとベストプラクティス
-globs: **/*.kt
+description: jOOQを使用した型安全なSQLクエリ構築と複数DB対応
+globs: ["**/infrastructure/persistence/**/*.kt", "**/adapter/persistence/**/*.kt", "**/jooq/**/*.kt"]
 alwaysApply: false
 ---
 # jOOQ型安全クエリ構築ルール
-
-File patterns: **/infrastructure/persistence/**/*.kt, **/adapter/persistence/**/*.kt
 
 ## Gradleセットアップと生成物のインポート（複数DB対応）
 
@@ -92,12 +90,53 @@ jooq {
 }
 ```
 
+## 複数DBアクセスの設定（Spring Boot）
+
+```kotlin
+@Configuration
+class DatabaseConfig {
+    // メインDBの設定
+    @Bean
+    @Primary
+    @ConfigurationProperties("spring.datasource.main")
+    fun mainDataSource(): DataSource {
+        return DataSourceBuilder.create().build()
+    }
+    
+    @Bean
+    @Primary
+    fun mainDSLContext(@Qualifier("mainDataSource") dataSource: DataSource): DSLContext {
+        return DSL.using(
+            dataSource,
+            SQLDialect.POSTGRES
+        )
+    }
+    
+    // レガシーDBの設定
+    @Bean
+    @ConfigurationProperties("spring.datasource.legacy")
+    fun legacyDataSource(): DataSource {
+        return DataSourceBuilder.create().build()
+    }
+    
+    @Bean
+    @Qualifier("legacyDSL")
+    fun legacyDSLContext(@Qualifier("legacyDataSource") dataSource: DataSource): DSLContext {
+        return DSL.using(
+            dataSource,
+            SQLDialect.MYSQL
+        )
+    }
+}
+```
+
 ## 基本原則
 
 1. **文字列でのテーブル名指定は禁止**: SQLクエリでのテーブル名の文字列直書きを避け、生成されたjOOQのテーブルクラスを使用する
 2. **型安全なクエリ構築**: クエリを文字列連結ではなくDSLコンテキストを使って構築する
 3. **SQLインジェクション防止**: 生のSQLの代わりに型安全なjOOQのAPIを使用する
 4. **コンパイル時の型チェック**: 生成されたメタデータクラスを使用して型の安全性を確保する
+5. **適切なDB選択**: 複数DBを使用する場合、適切なDSLコンテキストと生成されたメタデータを使い分ける
 
 ## テーブル/カラム参照（文字列を使わない）
 
@@ -113,6 +152,39 @@ mainDbCreate.select().from(USERS).where(USERS.ID.eq(1))
 import com.example.jooq.legacydb.Tables.LEGACY_ORDERS
 legacyDbCreate.select().from(LEGACY_ORDERS).where(LEGACY_ORDERS.ORDER_ID.eq(1))
 ```
+
+## 複数DB使用時の注意点
+
+1. **インポート衝突に注意**:
+   ```kotlin
+   // 同名テーブルがある場合は完全修飾名を使用
+   import com.example.jooq.maindb.Tables.USERS as MAIN_USERS
+   import com.example.jooq.legacydb.Tables.USERS as LEGACY_USERS
+   ```
+
+2. **適切なDSLコンテキストの選択**:
+   ```kotlin
+   @Service
+   class MultiDbService(
+       private val mainDsl: DSLContext,
+       @Qualifier("legacyDSL") private val legacyDsl: DSLContext
+   ) {
+       fun getUserWithOrders(userId: Int): UserWithOrdersDto {
+           // メインDBからユーザー情報取得
+           val user = mainDsl.selectFrom(MAIN_USERS)
+               .where(MAIN_USERS.ID.eq(userId))
+               .fetchOneInto(User::class.java)
+               ?: throw NotFoundException("User not found")
+               
+           // レガシーDBから注文情報取得
+           val orders = legacyDsl.selectFrom(LEGACY_ORDERS)
+               .where(LEGACY_ORDERS.USER_ID.eq(userId))
+               .fetchInto(Order::class.java)
+               
+           return UserWithOrdersDto(user, orders)
+       }
+   }
+   ```
 
 ## jOOQの基本コンセプト
 

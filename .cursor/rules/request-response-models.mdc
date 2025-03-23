@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: リクエスト/レスポンスモデルの設計
 globs: **/adapter/api/controller/*.kt
 alwaysApply: false
