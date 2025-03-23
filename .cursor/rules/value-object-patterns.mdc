@@ -1,11 +1,32 @@
 ---
 description: 値オブジェクト実装パターン
-globs: **/domain/model/**/*.kt
+globs: ["**/domain/model/value/*.kt", "**/domain/model/**/value/*.kt", "**/*Id.kt", "**/*Name.kt", "**/*Status.kt"]
 alwaysApply: false
 ---
 # 値オブジェクト実装パターン
 
-## 実装例
+## 適用シナリオ
+- プリミティブ型をラップした値オブジェクトの実装
+- ID、名前、金額など、ビジネスルールを持つ値の表現
+- 不変性と自己検証が必要なオブジェクト
+
+## 関連ルール
+- entity-factory-patterns: 値オブジェクトを使用するエンティティファクトリ
+- backend-repository-patterns: 値オブジェクトの永続化
+- uuid-id-type: ID型の値オブジェクト実装
+
+## クイックスタート
+- 値オブジェクトは不変で、等価性で比較される
+- `@JvmInline value class`を使用してオーバーヘッドを減らす
+- プライベートコンストラクタとファクトリメソッドで生成を制御
+- 必ずバリデーションを行う
+
+## 実装判断フロー
+1. どのような値? → 独自の検証ルールが必要な値 → 値オブジェクト化
+2. プリミティブ型は？ → String/Int/BigDecimal等に応じたバリデーション追加
+3. ビジネスルールは？ → fromメソッド内でrequireを使用した検証
+
+## 最小実装テンプレート
 ```kotlin
 @JvmInline
 value class Email private constructor(val value: String) {
@@ -20,14 +41,59 @@ value class Email private constructor(val value: String) {
 }
 ```
 
-## パターン
-| パターン | 説明 |
-|---------|------|
-| プライベートコンストラクタ | インスタンス化を制御 |
-| ファクトリメソッド | バリデーション込みの生成 |
-| 不変性 | 値の変更を許可しない |
-| 等価性 | 値が同じなら同一と判断 |
+## 実装チェックリスト
+- [ ] `@JvmInline value class`の使用
+- [ ] プライベートコンストラクタの定義
+- [ ] ファクトリメソッド(`from`など)の実装
+- [ ] バリデーションロジックの追加
+- [ ] 必要に応じて変換メソッドの追加
+
+## 複数ルール適用時の優先順位
+- 値オブジェクトはドメインモデルの基本構成要素として優先的に実装する
+- ID型には特にuuid-id-typeルールも参照する
+- エンティティとの関係は常に「エンティティが値オブジェクトを持つ」方向
+
+## 値オブジェクトの種類別実装ガイド
+
+### 文字列ベース
+```kotlin
+@JvmInline
+value class Name private constructor(val value: String) {
+    companion object {
+        fun from(value: String): Name {
+            require(value.isNotBlank()) { "名前は空にできません" }
+            require(value.length <= 100) { "名前は100文字以内にしてください" }
+            return Name(value)
+        }
+    }
+}
+```
+
+### 数値ベース
+```kotlin
+@JvmInline
+value class Amount private constructor(val value: BigDecimal) {
+    companion object {
+        fun from(value: BigDecimal): Amount {
+            require(value >= BigDecimal.ZERO) { "金額は0以上である必要があります" }
+            return Amount(value)
+        }
+        
+        fun from(value: Int): Amount = from(BigDecimal(value))
+        fun from(value: String): Amount = from(BigDecimal(value))
+    }
+    
+    operator fun plus(other: Amount): Amount = Amount(this.value + other.value)
+    operator fun minus(other: Amount): Amount {
+        val result = this.value - other.value
+        require(result >= BigDecimal.ZERO) { "金額は0以上である必要があります" }
+        return Amount(result)
+    }
+}
+```
 
 ## アンチパターン
 ❌ バリデーションなしで値を受け入れる
 ❌ ミュータブル（可変）な値オブジェクト 
+❌ プリミティブ型をそのまま使用する
+❌ ビジネスルールの検証をクライアント側に委ねる 

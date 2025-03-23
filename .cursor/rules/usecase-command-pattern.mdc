@@ -1,53 +1,102 @@
 ---
 description: ユースケースのコマンドパターン実装
-globs: **/application/usecase/**/*UseCase.kt
+globs: ["**/application/usecase/**/*CommandUseCase.kt", "**/application/usecase/**/*CreateUseCase.kt", "**/application/usecase/**/*UpdateUseCase.kt", "**/application/usecase/**/*DeleteUseCase.kt"]
 alwaysApply: false
 ---
 # ユースケースのコマンドパターン実装
 
-## コマンドオブジェクト
-```kotlin
-// 単純なデータ構造としてのコマンド
-data class CreateUserCommand(
-    val email: String,
-    val name: String,
-    val age: Int?
-)
-```
+## 適用シナリオ
+- エンティティの作成/更新/削除など、状態変更を伴うユースケースに適用
+- クエリ型ユースケースには適用しない（usecase-query-patternを使用）
 
-## ユースケース実装
+## 関連ルール
+- usecase-query-pattern: 読み取り専用操作のユースケース実装
+- backend-repository-patterns: コマンドの結果を永続化するためのリポジトリ
+- value-object-patterns: コマンドからドメインオブジェクトへの変換
+
+## クイックスタート
+- コマンドは単純なデータホルダー（入力値を保持するDTO）
+- ユースケースは1つの操作に責任を持つ
+- トランザクション管理はユースケース内で行う
+- コマンド→ドメインオブジェクト→結果の流れで実装
+
+## 実装判断フロー
+1. どのような操作? → 作成/更新/削除 → コマンドパターン採用
+2. トランザクション必要? → Yes → transactionTemplateを使用
+3. 戻り値は? → 作成時はID、更新/削除時はvoid または Boolean
+
+## 最小実装テンプレート
 ```kotlin
+// コマンドオブジェクト
+data class CreateEntityCommand(
+    val name: String,
+    val attribute: String
+)
+
+// ユースケース
 @Service
-class CreateUserUseCase(
-    private val userRepository: UserRepository,
+class CreateEntityUseCase(
+    private val entityRepository: EntityRepository,
     private val transactionTemplate: TransactionTemplate
 ) {
-    fun execute(command: CreateUserCommand): UserId {
+    fun execute(command: CreateEntityCommand): EntityId {
         return transactionTemplate.execute {
-            // コマンドからドメインオブジェクトへの変換
-            val email = Email.from(command.email)
+            // 1. ドメインオブジェクトへの変換
             val name = Name.from(command.name)
-            val age = command.age?.let { Age.from(it) }
+            val attribute = Attribute.from(command.attribute)
             
-            // ドメインロジックの実行
-            val user = User.create(email, name, age)
+            // 2. ドメインロジックの実行
+            val entity = Entity.create(name, attribute)
             
-            // 永続化
-            userRepository.save(user)
+            // 3. 永続化
+            val savedEntity = entityRepository.save(entity)
             
-            // 識別子を返却
-            user.id
+            // 4. 結果の返却
+            savedEntity.id
         }
     }
 }
 ```
 
-## パターン
-- コマンドは単純なデータホルダー
-- ユースケースは単一責務
-- トランザクションはユースケース内で管理
-- バリデーションはドメインオブジェクト生成時に実行
+## 実装チェックリスト
+- [ ] コマンドクラスを作成（データホルダー）
+- [ ] ユースケースクラスを作成
+- [ ] 必要な依存関係を注入
+- [ ] executeメソッドを実装
+- [ ] トランザクション管理を追加
+- [ ] 適切な戻り値の型を設定
+
+## 実装パターンの選択ガイド
+
+### 戻り値の選択
+- **エンティティ作成**: IDを返す
+- **エンティティ更新**: voidまたは更新後のエンティティIDを返す
+- **エンティティ削除**: voidを返す
+- **ビジネス処理**: 処理結果を表すDTOを返す
+
+### トランザクション管理
+```kotlin
+// Spring管理トランザクション
+@Transactional
+fun execute(command: CommandType): ResultType {
+    // 実装
+}
+
+// 手動トランザクション
+fun execute(command: CommandType): ResultType {
+    return transactionTemplate.execute {
+        // 実装
+    }
+}
+```
+
+## 複数ルール適用時の優先順位
+- このルールは状態変更を伴うユースケースのみに適用する
+- 同一ファイルにquery-patternも適用される場合、操作の本質で判断する
+- ドメインルール > 技術的規則の優先順位で適用する
 
 ## アンチパターン
 ❌ 複数の操作を1つのユースケースに入れる
-❌ ドメインロジックをユースケースに漏らす 
+❌ ドメインロジックをユースケースに漏らす
+❌ データベースアクセス詳細をユースケースに含める
+❌ ユースケースでエンティティの詳細実装に依存する 

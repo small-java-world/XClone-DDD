@@ -1,36 +1,128 @@
 ---
 description: ユースケースのクエリパターン実装
-globs: **/application/usecase/**/*UseCase.kt
+globs: ["**/application/usecase/**/*QueryUseCase.kt", "**/application/usecase/**/*GetUseCase.kt", "**/application/usecase/**/*FindUseCase.kt", "**/application/usecase/**/*SearchUseCase.kt"]
 alwaysApply: false
 ---
 # ユースケースのクエリパターン実装
 
-## クエリオブジェクト
-```kotlin
-data class GetUserQuery(
-    val userId: String
-)
-```
+## 適用シナリオ
+- エンティティの取得/検索/参照など、読み取り専用操作のユースケースに適用
+- 状態変更を伴うユースケースには適用しない（usecase-command-patternを使用）
 
-## ユースケース実装
+## 関連ルール
+- usecase-command-pattern: 状態変更を伴うユースケース実装
+- backend-repository-patterns: データ取得のためのリポジトリ
+- value-object-patterns: IDなどの値オブジェクト変換
+
+## クイックスタート
+- クエリは単純なデータホルダー（検索条件を保持）
+- 読み取り専用操作に使用（データの変更を伴わない）
+- 戻り値は通常DTOオブジェクト
+- トランザクションは基本的に読み取り専用
+
+## 実装判断フロー
+1. どのような操作? → 読み取り/検索/参照 → クエリパターン採用
+2. 単一エンティティの取得? → Yes → GetEntityQuery、No → 検索条件付きクエリ
+3. ページネーション必要? → Yes → Page<EntityDto>を戻り値に設定
+
+## 最小実装テンプレート
 ```kotlin
+// クエリオブジェクト
+data class GetEntityQuery(
+    val entityId: String
+)
+
+// ユースケース
 @Service
-class GetUserUseCase(
-    private val userRepository: UserRepository
+class GetEntityUseCase(
+    private val entityRepository: EntityRepository
 ) {
-    fun execute(query: GetUserQuery): UserDto? {
-        val userId = UserId.from(query.userId)
+    fun execute(query: GetEntityQuery): EntityDto? {
+        // 1. クエリパラメータの変換
+        val entityId = EntityId.from(query.entityId)
         
-        return userRepository.findById(userId)
-            ?.let { UserDto.from(it) }
+        // 2. リポジトリから取得
+        val entity = entityRepository.findById(entityId)
+            ?: return null
+            
+        // 3. DTOに変換して返却
+        return EntityDto.from(entity)
+    }
+}
+
+// 戻り値DTO
+data class EntityDto(
+    val id: String,
+    val name: String,
+    val attribute: String
+) {
+    companion object {
+        fun from(entity: Entity): EntityDto {
+            return EntityDto(
+                id = entity.id.value(),
+                name = entity.name.value(),
+                attribute = entity.attribute.value()
+            )
+        }
     }
 }
 ```
 
-## パターン
-| 戻り値タイプ | 用途 |
-|------------|------|
-| IDを返す | 作成系ユースケース |
-| DTOを返す | 参照系ユースケース |
-| Voidを返す | 更新/削除系ユースケース |
-| Booleanを返す | 確認系ユースケース | 
+## 実装チェックリスト
+- [ ] クエリクラスを作成（検索条件を保持）
+- [ ] ユースケースクラスを作成
+- [ ] レスポンスDTOを作成
+- [ ] executeメソッドを実装（変換→取得→再変換）
+- [ ] 必要に応じて読み取り専用トランザクションを追加
+
+## パターンバリエーション
+
+### 複数件取得
+```kotlin
+// クエリ
+data class FindEntitiesByStatusQuery(
+    val status: String,
+    val page: Int,
+    val size: Int
+)
+
+// ユースケース
+@Service
+class FindEntitiesByStatusUseCase(
+    private val entityQueryService: EntityQueryService
+) {
+    fun execute(query: FindEntitiesByStatusQuery): Page<EntityDto> {
+        val status = EntityStatus.valueOf(query.status)
+        val pageable = PageRequest.of(query.page, query.size)
+        
+        return entityQueryService.findByStatus(status, pageable)
+    }
+}
+```
+
+### 集計データ取得
+```kotlin
+// クエリ
+data class GetEntitySummaryQuery(val period: Period)
+
+// ユースケース
+@Service
+class GetEntitySummaryUseCase(
+    private val entityQueryService: EntityQueryService
+) {
+    fun execute(query: GetEntitySummaryQuery): EntitySummaryDto {
+        return entityQueryService.calculateSummary(query.period)
+    }
+}
+```
+
+## 複数ルール適用時の優先順位
+- このルールは読み取り専用ユースケースのみに適用する
+- 同一ファイルにcommand-patternも適用される場合、操作の本質で判断する
+- 読み取り操作はできるだけクエリサービスに委譲する
+
+## アンチパターン
+❌ クエリユースケースでデータを変更する
+❌ 重い処理やロジックをクエリユースケースに含める
+❌ 複数のクエリ操作を1つのユースケースに詰め込む
+❌ ドメインモデルをDTOに変換せずに直接返す

@@ -1,30 +1,47 @@
 ---
 description: エンティティのファクトリメソッド実装パターン
-globs: **/domain/model/**/*Entity.kt
+globs: ["**/domain/model/**/*Entity.kt", "**/domain/model/**/*.kt", "!**/domain/model/value/*.kt", "!**/domain/model/**/value/*.kt"]
 alwaysApply: false
 ---
 # エンティティのファクトリメソッドパターン
 
-## パターン
-- **create**: 新規エンティティの作成
-- **reconstruct**: リポジトリからのエンティティ再構築
+## 適用シナリオ
+- ドメインエンティティの生成ロジックのカプセル化
+- 集約ルートの一貫性保証
+- リポジトリからのエンティティ再構築
 
-## 実装例
+## 関連ルール
+- value-object-patterns: エンティティが使用する値オブジェクト
+- backend-repository-patterns: エンティティの永続化
+- uuid-id-type: エンティティIDの実装
+
+## クイックスタート
+- プライベートコンストラクタでインスタンス化を制御
+- createファクトリメソッドで新規エンティティを作成
+- reconstructファクトリメソッドでリポジトリからエンティティを再構築
+- 状態の検証をファクトリメソッド内で行う
+
+## 実装判断フロー
+1. エンティティの種類? → 集約ルート or 集約内エンティティ
+2. 必要なファクトリメソッド? → 通常はcreate + reconstruct
+3. 状態検証? → ファクトリメソッド内で値オブジェクトのバリデーションを活用
+
+## 最小実装テンプレート
 ```kotlin
-class User private constructor(
-    val id: UserId,
-    val email: Email,
-    val status: UserStatus,
+class Entity private constructor(
+    val id: EntityId,
+    val name: Name,
+    val status: EntityStatus,
     val createdAt: CreatedAt,
     val updatedAt: UpdatedAt
 ) {
     companion object {
         // 新規作成用ファクトリメソッド
-        fun create(email: Email): User {
-            return User(
-                id = UserId.generate(),
-                email = email,
-                status = UserStatus.ACTIVE,
+        fun create(name: Name): Entity {
+            return Entity(
+                id = EntityId.generate(),
+                name = name,
+                status = EntityStatus.ACTIVE,
                 createdAt = CreatedAt.now(),
                 updatedAt = UpdatedAt.now()
             )
@@ -32,12 +49,75 @@ class User private constructor(
         
         // リポジトリからの再構築用
         fun reconstruct(
-            id: UserId,
-            email: Email,
-            status: UserStatus,
+            id: EntityId,
+            name: Name,
+            status: EntityStatus,
             createdAt: CreatedAt,
             updatedAt: UpdatedAt
-        ): User = User(id, email, status, createdAt, updatedAt)
+        ): Entity = Entity(id, name, status, createdAt, updatedAt)
+    }
+}
+```
+
+## 実装チェックリスト
+- [ ] プライベートコンストラクタの定義
+- [ ] createファクトリメソッドの実装
+- [ ] reconstructファクトリメソッドの実装
+- [ ] 必要な状態検証の追加
+- [ ] IDの自動生成（新規作成時）
+
+## 複数ルール適用時の優先順位
+- エンティティは値オブジェクトに依存するため、まず値オブジェクトを実装する
+- 集約ルートのエンティティは子エンティティより先に実装する
+- ファクトリメソッドはエンティティクラス内のcompanion objectに定義する
+
+## パターンバリエーション
+
+### 集約ルートと子エンティティ
+```kotlin
+class Order private constructor(
+    val id: OrderId,
+    private val _items: MutableList<OrderItem> = mutableListOf()
+) {
+    // コレクションの不変参照を提供
+    val items: List<OrderItem> get() = _items.toList()
+    
+    // 子エンティティの追加メソッド
+    fun addItem(product: Product, quantity: Quantity): OrderItem {
+        val item = OrderItem.create(product, quantity)
+        _items.add(item)
+        return item
+    }
+    
+    companion object {
+        fun create(): Order = Order(OrderId.generate())
+        
+        fun reconstruct(id: OrderId, items: List<OrderItem>): Order {
+            val order = Order(id)
+            order._items.addAll(items)
+            return order
+        }
+    }
+}
+
+// 子エンティティ
+class OrderItem private constructor(
+    val id: OrderItemId,
+    val productId: ProductId,
+    val quantity: Quantity
+) {
+    companion object {
+        fun create(product: Product, quantity: Quantity): OrderItem {
+            return OrderItem(
+                id = OrderItemId.generate(),
+                productId = product.id,
+                quantity = quantity
+            )
+        }
+        
+        fun reconstruct(id: OrderItemId, productId: ProductId, quantity: Quantity): OrderItem {
+            return OrderItem(id, productId, quantity)
+        }
     }
 }
 ```
@@ -45,4 +125,6 @@ class User private constructor(
 ## アンチパターン
 ❌ コンストラクタを公開する
 ❌ IDを外部から注入する
-❌ 状態検証なしでオブジェクトを作成する 
+❌ 状態検証なしでオブジェクトを作成する
+❌ ビジネスルールをファクトリ外部に漏らす
+❌ データベース永続化ロジックをエンティティに含める 
