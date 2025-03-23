@@ -238,27 +238,29 @@ class EntityController(
 
 ### リポジトリ実装（Repository Implementations）
 
-リポジトリの実装は、ドメインオブジェクトとデータベースエンティティの変換を担当します。
+リポジトリの実装は、ドメインオブジェクトとデータベースレコードの変換を担当します。jOOQを使用して型安全なクエリを構築します。
 
 ```kotlin
 @Repository
 class EntityRepositoryImpl(
-    private val entityJpaRepository: EntityJpaRepository,
+    private val dsl: DSLContext,
     private val entityMapper: EntityMapper
 ) : EntityRepository {
     override fun save(entity: Entity): Entity {
-        val jpaEntity = entityMapper.toJpaEntity(entity)
-        val savedEntity = entityJpaRepository.save(jpaEntity)
-        return entityMapper.toDomain(savedEntity)
+        // jOOQを使用してエンティティを保存
+        // 詳細は jooq-rules.mdc を参照
+        return entity
     }
     
     override fun findById(id: EntityId): Entity? {
-        return entityJpaRepository.findById(id.value)
-            .map { entityMapper.toDomain(it) }
-            .orElse(null)
+        // jOOQを使用してエンティティを検索
+        // 詳細は jooq-rules.mdc を参照
+        return null
     }
 }
 ```
+
+詳細な実装とベストプラクティスについては `.cursor/rules/jooq-rules.mdc` を参照してください。
 
 ## インフラストラクチャ層の実装ガイドライン
 
