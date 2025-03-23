@@ -11,10 +11,10 @@ alwaysApply: false
 - クエリ型ユースケースには適用しない（usecase-query-patternを使用）
 
 ## 関連ルール
-- usecase-query-pattern: 読み取り専用操作のユースケース実装 (`application/usecase/query`に配置)
-- backend-repository-patterns: コマンドの結果を永続化するためのリポジトリ
-- value-object-patterns: コマンドからドメインオブジェクトへの変換 (`domain/model/value`に配置)
-- entity-factory-patterns: コマンドからのエンティティ生成 (`domain/model/entity`に配置)
+- usecase-query-pattern: 読み取り専用ユースケース実装 (`application/usecase/query`に配置)
+- backend-repository-patterns: コマンドで操作するエンティティの永続化
+- entity-factory-patterns: コマンドで生成するエンティティ (各集約ルート内の`entity`ディレクトリに配置)
+- value-object-patterns: コマンドで使用する値オブジェクト (各集約ルートの`value`ディレクトリに配置)
 
 ## クイックスタート
 - コマンドは単純なデータホルダー（入力値を保持するDTO）

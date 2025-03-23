@@ -1,15 +1,14 @@
 ---
 description: 値オブジェクト実装パターン
-globs: ["**/domain/model/value/**/*.kt"]
+globs: ["**/domain/model/**/value/*.kt", "**/*Id.kt", "**/*Name.kt", "**/*Status.kt"]
 alwaysApply: false
 ---
 # 値オブジェクト実装パターン
 
 ## 適用シナリオ
-- 値オブジェクトは全て`domain/model/value`ディレクトリに配置する
-- プリミティブ型をラップした値オブジェクトの実装
-- ID、名前、金額など、ビジネスルールを持つ値の表現
-- 不変性と自己検証が必要なオブジェクト
+- 各集約ルートディレクトリ内の`value`サブディレクトリに配置する値オブジェクト
+- ID、名前、ステータスなどプリミティブ型をラップする値オブジェクト
+- 不変性と値の検証が重要な場面
 
 ## 関連ルール
 - entity-factory-patterns: 値オブジェクトを使用するエンティティファクトリ (`domain/model/entity`に配置)
