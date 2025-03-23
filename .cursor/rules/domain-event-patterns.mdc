@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: ドメインイベント実装パターン
 globs: **/domain/model/**/*Event.kt
 alwaysApply: false

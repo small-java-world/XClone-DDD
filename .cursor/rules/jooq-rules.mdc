@@ -5,7 +5,7 @@ alwaysApply: false
 ---
 ---
 description: jOOQを使用した型安全なSQLクエリ構築と複数DB対応
-globs: ["**/infrastructure/persistence/**/*.kt", "**/adapter/persistence/**/*.kt", "**/jooq/**/*.kt"]
+globs: **/infrastructure/persistence/**/*.kt, "**/adapter/persistence/**/*.kt", "**/jooq/**/*.kt"]
 alwaysApply: false
 ---
 # jOOQ型安全クエリ構築ルール

@@ -5,7 +5,7 @@ alwaysApply: false
 ---
 ---
 description: エンティティのファクトリメソッド実装パターン
-globs: ["**/domain/model/**/*Entity.kt", "**/domain/model/**/*.kt", "!**/domain/model/**/value/*.kt"]
+globs: **/domain/model/**/*Entity.kt, **/domain/model/**/*.kt, !**/domain/model/**/value/*.kt
 alwaysApply: false
 ---
 # エンティティのファクトリメソッドパターン

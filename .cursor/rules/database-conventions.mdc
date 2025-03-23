@@ -5,7 +5,7 @@ alwaysApply: false
 ---
 ---
 description: データベース設計とマイグレーション規約
-globs: ["**/src/main/resources/db/migration/**/*.sql", "**/domain/model/**/*.kt", "**/infrastructure/persistence/**/*.kt"]
+globs: **/src/main/resources/db/migration/**/*.sql, **/domain/model/**/*.kt, **/infrastructure/persistence/**/*.kt
 ---
 # データベース設計とマイグレーション規約
 

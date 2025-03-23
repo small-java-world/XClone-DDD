@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: クエリサービスのテストルールとガイドライン
 globs: **/src/test/kotlin/**/application/query/**/*Test.kt, **/src/test/kotlin/**/adapter/persistence/query/**/*Test.kt
 alwaysApply: false

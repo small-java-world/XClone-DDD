@@ -5,7 +5,7 @@ alwaysApply: false
 ---
 ---
 description: Cursorルールファイル作成のガイドライン - AIエージェントが効率的に処理できるルール設計
-globs: ["**/.cursor/rules/*.md", "**/.cursor/rules/*.mdc"]
+globs: **/.cursor/rules/*.md, **/.cursor/rules/*.mdc
 alwaysApply: false
 ---
 # Cursorルールファイル作成のガイドライン

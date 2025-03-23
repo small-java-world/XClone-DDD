@@ -4,13 +4,11 @@ globs:
 alwaysApply: false
 ---
 ---
-description: 
-globs: 
+description: バックエンドのクリーンアーキテクチャとDDDの実装ガイドライン
+globs: **/*.kt
 alwaysApply: false
 ---
 # バックエンドのクリーンアーキテクチャとDDDの実装ガイドライン
-
-File patterns: **/*.kt
 
 ## 概要
 

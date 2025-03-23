@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: UUID型IDの実装パターン
 globs: **/domain/model/**/*Id.kt
 alwaysApply: false

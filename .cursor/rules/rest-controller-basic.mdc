@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: REST APIコントローラーの基本実装
 globs: **/adapter/api/controller/*Controller.kt
 alwaysApply: false

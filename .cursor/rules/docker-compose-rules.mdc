@@ -3,12 +3,15 @@ description:
 globs: 
 alwaysApply: false
 ---
+---
+description: データベース設計とマイグレーション規約
+globs: **/docker-compose.yml, **/Dockerfile*,**/*.env*
+---
 # Docker Compose構成と開発環境セットアップ規約
 
 ## 適用パス
-/**/docker-compose.yml
-/**/Dockerfile*
-/**/*.env*
+
+
 
 ## 説明
 このルールは、Docker Composeを使用した開発環境の構築と管理に関する規約を定めています。各サービスの配置、環境構成、最適化方法について定義しています。

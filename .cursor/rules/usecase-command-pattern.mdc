@@ -1,6 +1,11 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: ユースケースのコマンドパターン実装
-globs: ["**/application/usecase/command/**/*.kt"]
+globs: **/application/usecase/command/**/*.kt
 alwaysApply: false
 ---
 # ユースケースのコマンドパターン実装

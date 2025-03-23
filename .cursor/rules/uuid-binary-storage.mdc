@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: UUIDのバイナリ保存パターン
 globs: **/infrastructure/util/UuidUtil.kt
 alwaysApply: false

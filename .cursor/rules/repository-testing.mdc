@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: リポジトリのテストルールとガイドライン
 globs: **/src/test/kotlin/**/adapter/persistence/repository/**/*Test.kt
 alwaysApply: false

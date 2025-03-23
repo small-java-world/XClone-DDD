@@ -1,6 +1,11 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: 値オブジェクト実装パターン
-globs: ["**/domain/model/**/value/*.kt", "**/*Id.kt", "**/*Name.kt", "**/*Status.kt"]
+globs: **/domain/model/**/value/*.kt, **/*Id.kt, **/*Name.kt, **/*Status.kt
 alwaysApply: false
 ---
 # 値オブジェクト実装パターン

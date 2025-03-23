@@ -1,6 +1,6 @@
 ---
 description: リポジトリパターンの実装とインターフェース設計
-globs: ["**/domain/repository/**/*.kt", "**/adapter/persistence/repository/**/*.kt"]
+globs: **/domain/repository/**/*.kt, **/adapter/persistence/repository/**/*.kt
 alwaysApply: false
 ---
 # リポジトリパターンの実装とインターフェース設計

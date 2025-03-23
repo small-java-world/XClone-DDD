@@ -5,7 +5,7 @@ alwaysApply: false
 ---
 ---
 description: ドメイン境界の定義とパッケージ名規則
-globs: ["**/domain/**/*.kt", "**/domain/**/*.java"]
+globs: **/domain/**/*.kt, "**/domain/**/*.java
 ---
 # ドメイン境界の定義とパッケージ名規則
 

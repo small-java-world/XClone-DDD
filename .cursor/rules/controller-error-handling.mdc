@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: コントローラーのエラーハンドリング
 globs: **/adapter/api/error/*.kt
 alwaysApply: false
