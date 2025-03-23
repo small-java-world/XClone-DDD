@@ -1,9 +1,4 @@
 ---
-description: 
-globs: 
-alwaysApply: false
----
----
 description: リポジトリパターンの実装とインターフェース設計
 globs: ["**/src/main/kotlin/**/domain/repository/*.kt", "**/src/main/kotlin/**/infrastructure/repository/*.kt"]
 alwaysApply: false
@@ -30,40 +25,40 @@ alwaysApply: false
 ## リポジトリインターフェース設計
 
 ### 命名規則
-- `[エンティティ名]Repository`: 例えば `ProductRepository`、`OrderRepository`
+- `[エンティティ名]Repository`: 例えば `EntityRepository`、`AggregateRootRepository`
 
 ### 基本メソッド
 
 ```kotlin
-interface ProductRepository {
+interface EntityRepository {
     // 単一エンティティの取得
-    fun findById(id: ProductId): Product?
+    fun findById(id: EntityId): Entity?
     
     // 新規作成と更新
-    fun save(product: Product): Product
+    fun save(entity: Entity): Entity
     
     // 削除
-    fun delete(id: ProductId)
+    fun delete(id: EntityId)
     
     // コレクションの取得
-    fun findAll(): List<Product>
+    fun findAll(): List<Entity>
     
     // 条件による取得
-    fun findByStatus(status: ProductStatus): List<Product>
+    fun findByStatus(status: EntityStatus): List<Entity>
 }
 ```
 
 ### ページネーションと並べ替え
 
 ```kotlin
-interface ProductRepository {
+interface EntityRepository {
     // ... 他のメソッド
     
     // ページネーション対応
-    fun findAll(pageable: Pageable): Page<Product>
+    fun findAll(pageable: Pageable): Page<Entity>
     
     // 検索条件とページネーション
-    fun findByStatus(status: ProductStatus, pageable: Pageable): Page<Product>
+    fun findByStatus(status: EntityStatus, pageable: Pageable): Page<Entity>
 }
 ```
 
@@ -72,39 +67,39 @@ interface ProductRepository {
 複雑な検索条件は Specification パターンを使用して表現すると、柔軟な検索が可能になります。
 
 ```kotlin
-interface ProductRepository {
+interface EntityRepository {
     // ... 他のメソッド
     
     // Specificationパターンを使用した検索
-    fun findBySpecification(spec: ProductSpecification): List<Product>
-    fun findBySpecification(spec: ProductSpecification, pageable: Pageable): Page<Product>
+    fun findBySpecification(spec: EntitySpecification): List<Entity>
+    fun findBySpecification(spec: EntitySpecification, pageable: Pageable): Page<Entity>
 }
 
 // Specificationインターフェース
-interface ProductSpecification {
-    fun isSatisfiedBy(product: Product): Boolean
+interface EntitySpecification {
+    fun isSatisfiedBy(entity: Entity): Boolean
 }
 
 // 実装例
-class ActiveProductSpecification : ProductSpecification {
-    override fun isSatisfiedBy(product: Product): Boolean {
-        return product.status == ProductStatus.ACTIVE
+class ActiveEntitySpecification : EntitySpecification {
+    override fun isSatisfiedBy(entity: Entity): Boolean {
+        return entity.status == EntityStatus.ACTIVE
     }
 }
 
-class PriceRangeSpecification(private val min: Money, private val max: Money) : ProductSpecification {
-    override fun isSatisfiedBy(product: Product): Boolean {
-        return product.price >= min && product.price <= max
+class PriceRangeSpecification(private val min: Money, private val max: Money) : EntitySpecification {
+    override fun isSatisfiedBy(entity: Entity): Boolean {
+        return entity.price >= min && entity.price <= max
     }
 }
 
 // 組み合わせ
 class AndSpecification(
-    private val left: ProductSpecification, 
-    private val right: ProductSpecification
-) : ProductSpecification {
-    override fun isSatisfiedBy(product: Product): Boolean {
-        return left.isSatisfiedBy(product) && right.isSatisfiedBy(product)
+    private val left: EntitySpecification, 
+    private val right: EntitySpecification
+) : EntitySpecification {
+    override fun isSatisfiedBy(entity: Entity): Boolean {
+        return left.isSatisfiedBy(entity) && right.isSatisfiedBy(entity)
     }
 }
 ```
@@ -117,109 +112,221 @@ class AndSpecification(
 - トランザクション管理
 - キャッシュ管理
 
-
 ### jOOQを使用した実装例
 
 ```kotlin
 @Repository
-class JooqProductRepository(
+class JooqEntityRepository(
     private val dsl: DSLContext,
-    private val productMapper: ProductJooqMapper
-) : ProductRepository {
+    private val entityMapper: EntityJooqMapper
+) : EntityRepository {
     
-    override fun findById(id: ProductId): Product? {
-        val record = dsl.selectFrom(PRODUCTS)
-            .where(PRODUCTS.ID.eq(id.value()))
+    override fun findById(id: EntityId): Entity? {
+        val record = dsl.selectFrom(ENTITIES)
+            .where(ENTITIES.ID.eq(id.value()))
             .fetchOne()
         
-        return record?.let { productMapper.toDomain(it) }
+        return record?.let { entityMapper.toDomain(it) }
     }
     
-    override fun save(product: Product): Product {
-        val id = product.id.value()
+    override fun save(entity: Entity): Entity {
+        val id = entity.id.value()
         val exists = dsl.fetchExists(
-            dsl.selectFrom(PRODUCTS)
-                .where(PRODUCTS.ID.eq(id))
+            dsl.selectFrom(ENTITIES)
+                .where(ENTITIES.ID.eq(id))
         )
         
         if (exists) {
-            dsl.update(PRODUCTS)
-                .set(PRODUCTS.NAME, product.name.value())
-                .set(PRODUCTS.DESCRIPTION, product.description.value())
+            dsl.update(ENTITIES)
+                .set(ENTITIES.NAME, entity.name.value())
+                .set(ENTITIES.DESCRIPTION, entity.description.value())
                 // ... その他のフィールド
-                .set(PRODUCTS.UPDATED_AT, product.updatedAt.value())
-                .where(PRODUCTS.ID.eq(id))
+                .set(ENTITIES.UPDATED_AT, entity.updatedAt.value())
+                .where(ENTITIES.ID.eq(id))
                 .execute()
         } else {
-            dsl.insertInto(PRODUCTS)
-                .set(PRODUCTS.ID, id)
-                .set(PRODUCTS.SELLER_ID, product.sellerId.value())
-                .set(PRODUCTS.NAME, product.name.value())
+            dsl.insertInto(ENTITIES)
+                .set(ENTITIES.ID, id)
+                .set(ENTITIES.OWNER_ID, entity.ownerId.value())
+                .set(ENTITIES.NAME, entity.name.value())
                 // ... その他のフィールド
                 .execute()
         }
         
-        return product
+        return entity
     }
     
     // ... その他のメソッド実装
 }
 ```
 
-### 合成リポジトリパターン - 読み書き分離
+### クエリサービスパターン
 
-パフォーマンス最適化のために読み取り/書き込み操作を分離する場合:
+読み取り操作の最適化と関心事の分離のために、クエリサービスパターンを使用できます。このパターンでは、リポジトリは集約のライフサイクル管理に集中し、複雑な検索やレポートはクエリサービスが担当します。
 
 ```kotlin
-// 読み取り専用操作のインターフェース
-interface ProductReadRepository {
-    fun findById(id: ProductId): Product?
-    fun findAll(pageable: Pageable): Page<Product>
-    fun findByStatus(status: ProductStatus): List<Product>
+// クエリサービスインターフェース
+interface EntityQueryService {
+    fun findById(id: UUID): EntityDto?
+    fun findActiveEntities(pageable: Pageable): Page<EntityDto>
+    fun findByOwnerAndPriceRange(ownerId: UUID, minPrice: BigDecimal, maxPrice: BigDecimal): List<EntityDto>
+    fun findTopSellingEntities(limit: Int): List<EntitySummaryDto>
 }
 
-// 書き込み操作のインターフェース
-interface ProductWriteRepository {
-    fun save(product: Product): Product
-    fun delete(id: ProductId)
-}
-
-// 合成インターフェース
-interface ProductRepository : ProductReadRepository, ProductWriteRepository
-
-// 読み取り最適化実装
-@Repository
-class ProductReadJooqRepository(
-    private val dsl: DSLContext,
-    private val productMapper: ProductJooqMapper
-) : ProductReadRepository {
-    // jOOQを使用した読み取り最適化クエリ
-}
-
-// 書き込み実装
-@Repository
-class ProductWriteJpaRepository(
-    private val productJpaRepository: ProductJpaRepository,
-    private val productMapper: ProductMapper
-) : ProductWriteRepository {
-    // JPAを使用した書き込み操作
-}
-
-// 合成実装
-@Repository
-@Primary
-class CompositeProductRepository(
-    private val readRepository: ProductReadRepository,
-    private val writeRepository: ProductWriteRepository
-) : ProductRepository {
-    // 読み取りメソッドは読み取りリポジトリに委譲
-    override fun findById(id: ProductId): Product? = readRepository.findById(id)
-    override fun findAll(pageable: Pageable): Page<Product> = readRepository.findAll(pageable)
-    override fun findByStatus(status: ProductStatus): List<Product> = readRepository.findByStatus(status)
+// クエリサービスの実装
+@Service
+class EntityQueryServiceImpl(
+    private val dsl: DSLContext
+) : EntityQueryService {
     
-    // 書き込みメソッドは書き込みリポジトリに委譲
-    override fun save(product: Product): Product = writeRepository.save(product)
-    override fun delete(id: ProductId) = writeRepository.delete(id)
+    override fun findById(id: UUID): EntityDto? {
+        return dsl.select(
+                ENTITIES.ID,
+                ENTITIES.OWNER_ID,
+                ENTITIES.NAME,
+                ENTITIES.DESCRIPTION,
+                ENTITIES.PRICE,
+                ENTITIES.STATUS,
+                ENTITIES.CREATED_AT,
+                ENTITIES.UPDATED_AT,
+                OWNERS.NAME.`as`("owner_name")
+            )
+            .from(ENTITIES)
+            .join(OWNERS).on(ENTITIES.OWNER_ID.eq(OWNERS.ID))
+            .where(ENTITIES.ID.eq(id))
+            .fetchOneInto(EntityDto::class.java)
+    }
+    
+    override fun findActiveEntities(pageable: Pageable): Page<EntityDto> {
+        // ページネーション対応のクエリ実装
+        val query = dsl.select(
+                ENTITIES.ID,
+                ENTITIES.OWNER_ID,
+                ENTITIES.NAME,
+                ENTITIES.DESCRIPTION,
+                ENTITIES.PRICE,
+                ENTITIES.STATUS,
+                ENTITIES.CREATED_AT,
+                ENTITIES.UPDATED_AT,
+                OWNERS.NAME.`as`("owner_name")
+            )
+            .from(ENTITIES)
+            .join(OWNERS).on(ENTITIES.OWNER_ID.eq(OWNERS.ID))
+            .where(ENTITIES.STATUS.eq(EntityStatus.ACTIVE.name))
+        
+        // ページネーション処理
+        val total = dsl.selectCount().from(ENTITIES)
+            .where(ENTITIES.STATUS.eq(EntityStatus.ACTIVE.name))
+            .fetchOne(0, Long::class.java) ?: 0L
+        
+        val results = query
+            .orderBy(ENTITIES.CREATED_AT.desc())
+            .limit(pageable.pageSize)
+            .offset(pageable.offset)
+            .fetchInto(EntityDto::class.java)
+        
+        return PageImpl(results, pageable, total)
+    }
+    
+    override fun findByOwnerAndPriceRange(ownerId: UUID, minPrice: BigDecimal, maxPrice: BigDecimal): List<EntityDto> {
+        return dsl.select(
+                ENTITIES.ID,
+                ENTITIES.OWNER_ID,
+                ENTITIES.NAME,
+                ENTITIES.DESCRIPTION,
+                ENTITIES.PRICE,
+                ENTITIES.STATUS,
+                ENTITIES.CREATED_AT,
+                ENTITIES.UPDATED_AT,
+                OWNERS.NAME.`as`("owner_name")
+            )
+            .from(ENTITIES)
+            .join(OWNERS).on(ENTITIES.OWNER_ID.eq(OWNERS.ID))
+            .where(
+                ENTITIES.OWNER_ID.eq(ownerId)
+                .and(ENTITIES.PRICE.ge(minPrice))
+                .and(ENTITIES.PRICE.le(maxPrice))
+                .and(ENTITIES.STATUS.eq(EntityStatus.ACTIVE.name))
+            )
+            .orderBy(ENTITIES.PRICE.asc())
+            .fetchInto(EntityDto::class.java)
+    }
+    
+    override fun findTopSellingEntities(limit: Int): List<EntitySummaryDto> {
+        // 複雑な集計クエリ
+        return dsl.select(
+                ENTITIES.ID,
+                ENTITIES.NAME,
+                ENTITIES.PRICE,
+                DSL.count(ORDER_ITEMS.ID).`as`("sales_count"),
+                DSL.sum(ORDER_ITEMS.QUANTITY).`as`("total_quantity")
+            )
+            .from(ENTITIES)
+            .join(ORDER_ITEMS).on(ENTITIES.ID.eq(ORDER_ITEMS.ENTITY_ID))
+            .join(ORDERS).on(ORDER_ITEMS.ORDER_ID.eq(ORDERS.ID))
+            .where(ORDERS.STATUS.eq(OrderStatus.COMPLETED.name))
+            .groupBy(ENTITIES.ID, ENTITIES.NAME, ENTITIES.PRICE)
+            .orderBy(DSL.field("sales_count").desc())
+            .limit(limit)
+            .fetchInto(EntitySummaryDto::class.java)
+    }
+}
+
+// DTOクラス
+data class EntityDto(
+    val id: UUID,
+    val ownerId: UUID,
+    val name: String,
+    val description: String,
+    val price: BigDecimal,
+    val status: String,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+    val ownerName: String? // 結合データ
+)
+
+data class EntitySummaryDto(
+    val id: UUID,
+    val name: String,
+    val price: BigDecimal,
+    val salesCount: Int,
+    val totalQuantity: Int
+)
+```
+
+### リポジトリとクエリサービスの使い分け
+
+- **リポジトリ**: 集約の整合性を保つ操作（作成、更新、削除）とIDによる取得に使用
+- **クエリサービス**: 複雑な検索条件、結合、集計を含むデータ取得に使用
+
+```kotlin
+@UseCase
+class CreateEntityUseCase(
+    private val entityRepository: EntityRepository
+) {
+    fun execute(command: CreateEntityCommand): EntityId {
+        // ドメインモデルを作成
+        val entity = Entity.create(/* パラメータ */)
+        
+        // リポジトリを使用して永続化
+        val savedEntity = entityRepository.save(entity)
+        
+        return savedEntity.id
+    }
+}
+
+@UseCase
+class FindEntitiesByOwnerAndPriceRangeUseCase(
+    private val entityQueryService: EntityQueryService
+) {
+    fun execute(query: FindEntitiesQuery): List<EntityDto> {
+        // クエリサービスを使用して検索
+        return entityQueryService.findByOwnerAndPriceRange(
+            query.ownerId,
+            query.minPrice,
+            query.maxPrice
+        )
+    }
 }
 ```
 
@@ -229,18 +336,18 @@ class CompositeProductRepository(
 
 ```kotlin
 // インメモリリポジトリ実装（テスト用）
-class InMemoryProductRepository : ProductRepository {
-    private val products = ConcurrentHashMap<UUID, Product>()
+class InMemoryEntityRepository : EntityRepository {
+    private val entities = ConcurrentHashMap<UUID, Entity>()
     
-    override fun findById(id: ProductId): Product? = products[id.value()]
+    override fun findById(id: EntityId): Entity? = entities[id.value()]
     
-    override fun save(product: Product): Product {
-        products[product.id.value()] = product
-        return product
+    override fun save(entity: Entity): Entity {
+        entities[entity.id.value()] = entity
+        return entity
     }
     
-    override fun delete(id: ProductId) {
-        products.remove(id.value())
+    override fun delete(id: EntityId) {
+        entities.remove(id.value())
     }
     
     // ... その他のメソッド実装
@@ -251,21 +358,21 @@ class InMemoryProductRepository : ProductRepository {
 
 ```kotlin
 @DataJpaTest
-class ProductRepositoryTest {
+class EntityRepositoryTest {
     @Autowired
-    private lateinit var productJpaRepository: ProductJpaRepository
+    private lateinit var entityJpaRepository: EntityJpaRepository
     
-    private lateinit var productRepository: ProductRepository
-    private lateinit var productMapper: ProductMapper
+    private lateinit var entityRepository: EntityRepository
+    private lateinit var entityMapper: EntityMapper
     
     @BeforeEach
     fun setup() {
-        productMapper = ProductMapper()
-        productRepository = JpaProductRepository(productJpaRepository, productMapper)
+        entityMapper = EntityMapper()
+        entityRepository = JpaEntityRepository(entityJpaRepository, entityMapper)
     }
     
     @Test
-    fun `save and find product by id`() {
+    fun `save and find entity by id`() {
         // テスト実装
     }
 }

@@ -1,0 +1,145 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: RESTコントローラーのテストルールとガイドライン
+globs: **/src/test/kotlin/**/adapter/rest/**/*Test.kt
+alwaysApply: false
+---
+# コントローラーテストルール
+
+File patterns: **/src/test/kotlin/**/adapter/rest/**/*Test.kt
+
+## 基本原則
+
+1. **MockMvcの使用**: Springの`MockMvc`を使用してREST APIをテストする
+2. **入力検証**: リクエスト入力の検証ロジックをテストする
+3. **例外ハンドリング**: エラーレスポンスが正しく返されることを確認する
+4. **モック依存関係**: ユースケースなどの依存関係はモック化する
+
+## コントローラーテストの例
+
+リソース作成のテスト例：
+
+```kotlin
+@WebMvcTest(EntityController::class)
+class EntityControllerTest {
+    @Autowired
+    private lateinit var mockMvc: MockMvc
+    
+    @MockkBean
+    private lateinit var createEntityUseCase: CreateEntityUseCase
+    
+    @Test
+    fun `createEntity should return 201 Created with location header`() {
+        // Given
+        val entityId = EntityId.generate()
+        val request = CreateEntityRequest(name = "test-name", attribute = "test-attribute")
+        
+        every { createEntityUseCase.execute(any()) } returns entityId
+        
+        // When/Then
+        mockMvc.perform(
+            MockMvcRequestBuilders.post("/api/entities")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(ObjectMapper().writeValueAsString(request))
+        )
+            .andExpect(MockMvcResultMatchers.status().isCreated)
+            .andExpect(MockMvcResultMatchers.header().string("Location", containsString(entityId.toString())))
+            .andDo(MockMvcResultHandlers.print())
+        
+        verify { createEntityUseCase.execute(match { 
+            it.name == "test-name" && it.attribute == "test-attribute" 
+        }) }
+    }
+    
+    @Test
+    fun `createEntity should return 400 Bad Request when request is invalid`() {
+        // Given
+        val invalidRequest = CreateEntityRequest("", "")
+        
+        // When/Then
+        mockMvc.perform(
+            MockMvcRequestBuilders.post("/api/entities")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(ObjectMapper().writeValueAsString(invalidRequest))
+        )
+            .andExpect(MockMvcResultMatchers.status().isBadRequest)
+            .andExpect(MockMvcResultMatchers.jsonPath("$.errors").isArray)
+            .andExpect(MockMvcResultMatchers.jsonPath("$.errors[*].field", containsInAnyOrder("name", "attribute")))
+            .andDo(MockMvcResultHandlers.print())
+        
+        verify(exactly = 0) { createEntityUseCase.execute(any()) }
+    }
+    
+    @Test
+    fun `createEntity should return 409 Conflict when attribute is already used`() {
+        // Given
+        val request = CreateEntityRequest(name = "test-name", attribute = "test-attribute")
+        
+        every { createEntityUseCase.execute(any()) } throws DuplicateAttributeException("Attribute already in use")
+        
+        // When/Then
+        mockMvc.perform(
+            MockMvcRequestBuilders.post("/api/entities")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(ObjectMapper().writeValueAsString(request))
+        )
+            .andExpect(MockMvcResultMatchers.status().isConflict)
+            .andExpect(MockMvcResultMatchers.jsonPath("$.message").value("Attribute already in use"))
+            .andDo(MockMvcResultHandlers.print())
+        
+        verify { createEntityUseCase.execute(any()) }
+    }
+}
+```
+
+リソース取得のテスト例：
+
+```kotlin
+@Test
+fun `getEntity should return 200 OK with entity`() {
+    // Given
+    val entityId = EntityId.generate()
+    val entityDto = EntityDto(
+        id = entityId.toString(),
+        name = "test-name",
+        attribute = "test-attribute",
+        createdAt = LocalDateTime.now()
+    )
+    
+    every { getEntityUseCase.execute(entityId.toString()) } returns entityDto
+    
+    // When/Then
+    mockMvc.perform(
+        MockMvcRequestBuilders.get("/api/entities/{id}", entityId.toString())
+            .contentType(MediaType.APPLICATION_JSON)
+    )
+        .andExpect(MockMvcResultMatchers.status().isOk)
+        .andExpect(MockMvcResultMatchers.jsonPath("$.id").value(entityId.toString()))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.name").value("test-name"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.attribute").value("test-attribute"))
+        .andDo(MockMvcResultHandlers.print())
+}
+
+@Test
+fun `getEntity should return 404 Not Found when entity does not exist`() {
+    // Given
+    val entityId = EntityId.generate().toString()
+    
+    every { getEntityUseCase.execute(entityId) } returns null
+    
+    // When/Then
+    mockMvc.perform(
+        MockMvcRequestBuilders.get("/api/entities/{id}", entityId)
+            .contentType(MediaType.APPLICATION_JSON)
+    )
+        .andExpect(MockMvcResultMatchers.status().isNotFound)
+}
+```
+
+## まとめ
+
+コントローラーテストでは、実際のHTTPリクエストとレスポンスをモックして、APIエンドポイントの動作を検証します。入力検証、ステータスコード、レスポンスボディ、ヘッダーなどを確認し、ユースケースやその他の依存関係はモック化することで、コントローラーのロジックに焦点を当てたテストを実施します。 

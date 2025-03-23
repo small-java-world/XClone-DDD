@@ -1,0 +1,505 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: jOOQを使用した型安全なSQLクエリ構築のルールとベストプラクティス
+globs: **/*.kt
+alwaysApply: false
+---
+# jOOQ型安全クエリ構築ルール
+
+File patterns: **/infrastructure/persistence/**/*.kt, **/adapter/persistence/**/*.kt
+
+## Gradleセットアップと生成物のインポート（複数DB対応）
+
+```kotlin
+// build.gradle.kts
+plugins {
+    kotlin("jvm") version "1.9.0"
+    id("org.jooq.jooq-codegen-gradle") version "3.18.x"
+}
+
+// 依存関係
+dependencies {
+    // jOOQ関連
+    implementation("org.jooq:jooq:3.18.6")
+    implementation("org.jooq:jooq-meta:3.18.6")
+    implementation("org.jooq:jooq-codegen:3.18.6")
+    
+    // データベースドライバー
+    implementation("org.postgresql:postgresql:42.6.0")
+    implementation("mysql:mysql-connector-java:8.0.33")
+    
+    // Spring関連（オプション）
+    implementation("org.springframework.boot:spring-boot-starter-jooq:3.2.0")
+    implementation("org.springframework.boot:spring-boot-starter-jdbc:3.2.0")
+}
+
+// jOOQの設定（複数DB対応）
+jooq {
+    version.set("3.18.x")
+    configurations {
+        // メインDB (PostgreSQL)
+        create("mainDb") {
+            generateSchemaSourceOnCompilation.set(true)
+            jdbc {
+                driver = "org.postgresql.Driver"
+                url = "jdbc:postgresql://localhost:5432/maindb"
+                user = "postgres"
+                password = "postgres"
+            }
+            generator {
+                database {
+                    name = "org.jooq.meta.postgres.PostgresDatabase"
+                    includes = ".*"
+                    excludes = "flyway_schema_history | jooq_.*"
+                    // スキーマを指定
+                    inputSchema = "public"
+                }
+                target {
+                    // メインDBのパッケージ名
+                    packageName = "com.example.jooq.maindb"
+                    directory = "${project.buildDir}/generated-src/jooq/mainDb"
+                }
+            }
+        }
+        
+        // サブDB (MySQL)
+        create("legacyDb") {
+            generateSchemaSourceOnCompilation.set(true)
+            jdbc {
+                driver = "com.mysql.cj.jdbc.Driver"
+                url = "jdbc:mysql://localhost:3306/legacydb"
+                user = "root"
+                password = "root"
+            }
+            generator {
+                database {
+                    name = "org.jooq.meta.mysql.MySQLDatabase"
+                    includes = ".*"
+                    excludes = "flyway_schema_history | jooq_.*"
+                }
+                target {
+                    // レガシーDBのパッケージ名
+                    packageName = "com.example.jooq.legacydb"
+                    directory = "${project.buildDir}/generated-src/jooq/legacyDb"
+                }
+            }
+        }
+    }
+}
+```
+
+## 基本原則
+
+1. **文字列でのテーブル名指定は禁止**: SQLクエリでのテーブル名の文字列直書きを避け、生成されたjOOQのテーブルクラスを使用する
+2. **型安全なクエリ構築**: クエリを文字列連結ではなくDSLコンテキストを使って構築する
+3. **SQLインジェクション防止**: 生のSQLの代わりに型安全なjOOQのAPIを使用する
+4. **コンパイル時の型チェック**: 生成されたメタデータクラスを使用して型の安全性を確保する
+
+## テーブル/カラム参照（文字列を使わない）
+
+```kotlin
+// 悪い例（文字列）- 禁止
+mainDbCreate.select().from("USERS").where("ID = ?", 1)
+
+// 良い例（型安全）- メインDB
+import com.example.jooq.maindb.Tables.USERS
+mainDbCreate.select().from(USERS).where(USERS.ID.eq(1))
+
+// 良い例（型安全）- レガシーDB
+import com.example.jooq.legacydb.Tables.LEGACY_ORDERS
+legacyDbCreate.select().from(LEGACY_ORDERS).where(LEGACY_ORDERS.ORDER_ID.eq(1))
+```
+
+## jOOQの基本コンセプト
+
+- **型安全SQL構築**: 文字列ではなく生成されたメタデータクラスを使用
+- **ジェネレータで自動生成されるクラス**:
+  - テーブル定数: `com.example.jooq.Tables`
+  - テーブルクラス: `com.example.jooq.tables.Users`
+  - レコードクラス: `com.example.jooq.tables.records.UsersRecord`
+  - POJOクラス: `com.example.jooq.tables.pojos.User`
+  - DAOクラス: `com.example.jooq.tables.daos.UserDao`
+
+## 基本クエリ
+
+### SELECT
+
+```kotlin
+// 必要なインポート
+import com.example.jooq.maindb.Tables.USERS
+import org.jooq.Result
+import org.jooq.Record
+import org.jooq.Record2
+
+// 基本SELECT
+val result: Result<Record> = dsl.select().from(USERS).fetch()
+
+// 特定カラム
+val result: Result<Record2<Int?, String?>> = dsl
+    .select(USERS.ID, USERS.NAME)
+    .from(USERS)
+    .fetch()
+
+// WHERE条件
+val result = dsl
+    .selectFrom(USERS)
+    .where(USERS.EMAIL.like("%.com"))
+    .and(USERS.ACTIVE.eq(true))
+    .fetch()
+```
+
+### INSERT
+
+```kotlin
+// 必要なインポート
+import com.example.jooq.maindb.Tables.USERS
+import com.example.jooq.maindb.tables.records.UsersRecord
+
+// 基本INSERT
+val user: UsersRecord = dsl.newRecord(USERS)
+user.name = "John"
+user.email = "john@example.com"
+user.store()
+
+// INSERT後にレコード取得（自動生成ID使用）
+val insertedUser = dsl
+    .insertInto(USERS, USERS.NAME, USERS.EMAIL)
+    .values("John", "john@example.com")
+    .returning() // 全カラム返却
+    .fetchOne()
+
+// 特定カラムのみ返却
+val insertedId = dsl
+    .insertInto(USERS, USERS.NAME, USERS.EMAIL)
+    .values("John", "john@example.com")
+    .returning(USERS.ID)
+    .fetchOne()
+```
+
+### UPDATE
+
+```kotlin
+// 必要なインポート
+import com.example.jooq.maindb.Tables.USERS
+
+val updated = dsl
+    .update(USERS)
+    .set(USERS.NAME, "John Doe")
+    .where(USERS.ID.eq(1))
+    .execute()
+```
+
+### DELETE
+
+```kotlin
+// 必要なインポート
+import com.example.jooq.maindb.Tables.USERS
+
+val deleted = dsl
+    .deleteFrom(USERS)
+    .where(USERS.ID.eq(1))
+    .execute()
+```
+
+## JOINの使用
+
+```kotlin
+// 必要なインポート
+import com.example.jooq.maindb.Tables.USERS
+import com.example.jooq.maindb.Tables.ORDERS
+
+// INNER JOIN
+val result = dsl
+    .select(USERS.NAME, ORDERS.ORDER_DATE)
+    .from(USERS)
+    .join(ORDERS).on(USERS.ID.eq(ORDERS.USER_ID))
+    .fetch()
+
+// LEFT OUTER JOIN
+val result = dsl
+    .select(USERS.NAME, ORDERS.ORDER_DATE)
+    .from(USERS)
+    .leftJoin(ORDERS).on(USERS.ID.eq(ORDERS.USER_ID))
+    .fetch()
+```
+
+## エラー処理とNullハンドリング
+
+```kotlin
+// nullableな結果のハンドリング
+fun findUserById(id: Int): User {
+    return dsl.selectFrom(USERS)
+        .where(USERS.ID.eq(id))
+        .fetchOneInto(User::class.java)
+        ?: throw NotFoundException("User not found with ID: $id")
+}
+
+// 結果が存在するかどうかの確認
+fun userExists(email: String): Boolean {
+    return dsl.fetchExists(
+        dsl.selectFrom(USERS)
+           .where(USERS.EMAIL.eq(email))
+    )
+}
+
+// オプショナルな結果の処理
+fun findOptionalUserByEmail(email: String): User? {
+    return dsl.selectFrom(USERS)
+        .where(USERS.EMAIL.eq(email))
+        .fetchOneInto(User::class.java)
+}
+```
+
+## トランザクション管理
+
+```kotlin
+// jOOQのネイティブAPIを使用
+fun createUser(user: User, dsl: DSLContext) {
+    dsl.transaction { config ->
+        val ctx = DSL.using(config)
+        
+        // ユーザーの登録
+        val userId = ctx.insertInto(USERS)
+            .set(USERS.NAME, user.name)
+            .set(USERS.EMAIL, user.email)
+            .returning(USERS.ID)
+            .fetchOne()?.getValue(USERS.ID)
+            ?: throw RuntimeException("ユーザー登録に失敗しました")
+            
+        // ユーザー設定の登録
+        ctx.insertInto(USER_SETTINGS)
+            .set(USER_SETTINGS.USER_ID, userId)
+            .set(USER_SETTINGS.THEME, "default")
+            .set(USER_SETTINGS.NOTIFICATIONS_ENABLED, true)
+            .execute()
+    }
+}
+
+// Spring @Transactionalを使用
+@Service
+class UserService(private val dsl: DSLContext) {
+    
+    @Transactional
+    fun createUser(user: User) {
+        // ユーザーの登録
+        val userId = dsl.insertInto(USERS)
+            .set(USERS.NAME, user.name)
+            .set(USERS.EMAIL, user.email)
+            .returning(USERS.ID)
+            .fetchOne()?.getValue(USERS.ID)
+            ?: throw RuntimeException("ユーザー登録に失敗しました")
+            
+        // ユーザー設定の登録
+        dsl.insertInto(USER_SETTINGS)
+            .set(USER_SETTINGS.USER_ID, userId)
+            .set(USER_SETTINGS.THEME, "default")
+            .set(USER_SETTINGS.NOTIFICATIONS_ENABLED, true)
+            .execute()
+    }
+}
+```
+
+## 高度なクエリ
+
+### グループ化と集計
+
+```kotlin
+val result = dsl
+    .select(USERS.DEPARTMENT, count())
+    .from(USERS)
+    .groupBy(USERS.DEPARTMENT)
+    .fetch()
+```
+
+### サブクエリ
+
+```kotlin
+// サブクエリ
+val subquery = dsl
+    .select(ORDERS.USER_ID)
+    .from(ORDERS)
+    .where(ORDERS.ORDER_DATE.gt(LocalDate.now().minusDays(30)))
+
+val result = dsl
+    .selectFrom(USERS)
+    .where(USERS.ID.`in`(subquery))
+    .fetch()
+```
+
+### ページネーション
+
+```kotlin
+val result = dsl
+    .selectFrom(USERS)
+    .orderBy(USERS.NAME)
+    .limit(10)
+    .offset(20)
+    .fetch()
+```
+
+## リポジトリパターンでの実装
+
+```kotlin
+@Repository
+class UserRepositoryImpl(
+    private val dsl: DSLContext,
+    private val transactionTemplate: TransactionTemplate
+) : UserRepository {
+    
+    override fun findById(id: UserId): User? {
+        // 生成されたテーブル/カラムを使用（文字列なし）
+        return dsl.select()
+            .from(USERS)
+            .where(USERS.ID.eq(id.value))
+            .fetchOneInto(User::class.java)
+    }
+    
+    override fun save(user: User): User {
+        return transactionTemplate.execute {
+            val exists = dsl.fetchExists(
+                dsl.selectFrom(USERS)
+                   .where(USERS.ID.eq(user.id.value))
+            )
+            
+            if (exists) {
+                // 更新
+                dsl.update(USERS)
+                   .set(USERS.NAME, user.name)
+                   .set(USERS.EMAIL, user.email)
+                   .where(USERS.ID.eq(user.id.value))
+                   .execute()
+            } else {
+                // 新規作成
+                dsl.insertInto(USERS)
+                   .set(USERS.ID, user.id.value)
+                   .set(USERS.NAME, user.name)
+                   .set(USERS.EMAIL, user.email)
+                   .execute()
+            }
+            
+            user
+        } ?: throw RuntimeException("Failed to save user")
+    }
+}
+```
+
+## クエリサービスでの実装
+
+```kotlin
+@Service
+class UserQueryServiceImpl(
+    private val dsl: DSLContext
+) : UserQueryService {
+    
+    override fun search(criteria: SearchCriteria): List<UserDto> {
+        val conditions = buildConditions(criteria)
+        
+        return dsl.select(
+                USERS.ID,
+                USERS.NAME,
+                USERS.EMAIL,
+                USERS.CREATED_AT,
+                PROFILES.BIO.`as`("bio")
+            )
+            .from(USERS)
+            .leftJoin(PROFILES).on(USERS.ID.eq(PROFILES.USER_ID))
+            .where(conditions)
+            .orderBy(USERS.CREATED_AT.desc())
+            .fetch()
+            .map { record ->
+                UserDto(
+                    id = record[USERS.ID].toString(),
+                    name = record[USERS.NAME],
+                    email = record[USERS.EMAIL],
+                    bio = record["bio"] as String?,
+                    createdAt = record[USERS.CREATED_AT]
+                )
+            }
+    }
+    
+    private fun buildConditions(criteria: SearchCriteria): Condition {
+        var condition = DSL.noCondition()
+        
+        criteria.keyword?.let {
+            condition = condition.and(
+                USERS.NAME.containsIgnoreCase(it)
+                .or(USERS.EMAIL.containsIgnoreCase(it))
+            )
+        }
+        
+        criteria.fromDate?.let {
+            condition = condition.and(USERS.CREATED_AT.greaterOrEqual(it.atStartOfDay()))
+        }
+        
+        criteria.toDate?.let {
+            condition = condition.and(USERS.CREATED_AT.lessOrEqual(it.atTime(23, 59, 59)))
+        }
+        
+        return condition
+    }
+}
+```
+
+## N+1問題の回避パターン
+
+```kotlin
+// 悪い例（N+1問題が発生する）
+fun findUsersWithPostsBad(): List<UserWithPostsDto> {
+    val users = dsl.selectFrom(USERS).fetch()
+    
+    return users.map { user ->
+        val posts = dsl.selectFrom(POSTS)
+            .where(POSTS.USER_ID.eq(user[USERS.ID]))
+            .fetch() // N回のクエリが発生
+            
+        UserWithPostsDto(
+            id = user[USERS.ID],
+            name = user[USERS.NAME],
+            posts = posts.map { PostDto(it[POSTS.ID], it[POSTS.CONTENT]) }
+        )
+    }
+}
+
+// 良い例（一括取得）
+fun findUsersWithPostsGood(): List<UserWithPostsDto> {
+    // 1. ユーザー取得
+    val users = dsl.selectFrom(USERS).fetch()
+    val userIds = users.map { it[USERS.ID] }
+    
+    // 2. すべてのユーザーの投稿を一度に取得
+    val postsMap = dsl.selectFrom(POSTS)
+        .where(POSTS.USER_ID.`in`(userIds))
+        .fetch()
+        .intoGroups(POSTS.USER_ID)
+    
+    // 3. ユーザーと投稿を組み合わせる
+    return users.map { user ->
+        val userId = user[USERS.ID]
+        val userPosts = postsMap[userId] ?: emptyList()
+        
+        UserWithPostsDto(
+            id = userId,
+            name = user[USERS.NAME],
+            posts = userPosts.map { PostDto(it[POSTS.ID], it[POSTS.CONTENT]) }
+        )
+    }
+}
+```
+
+## アンチパターン
+
+以下のようなアンチパターンは避けてください：
+
+1. **文字列でのクエリ構築**: 文字列連結によるSQL構築はSQLインジェクションに弱く、型安全性がない
+2. **テーブル名の文字列直書き**: テーブル名を文字列として指定せず、生成されたメタデータクラスを使用
+3. **生のSQLの過剰使用**: jOOQの型安全なAPIが利用できる場合は生のSQLを避ける
+4. **パフォーマンスを考慮しないクエリ**: 必要なデータだけを選択し、適切なインデックスとJOINを活用する
+5. **N+1問題**: 関連データは個別のクエリではなく一括で取得する
+
+## まとめ
+
+jOOQは型安全なSQLクエリ構築を実現し、SQLインジェクションのリスクを軽減します。生成されたメタデータクラスを活用することで、コンパイル時の型チェックが可能になり、実行時エラーを減らすことができます。リポジトリパターンやクエリサービスと組み合わせることで、保守性の高いデータアクセスコードを実現できます。 

@@ -1,0 +1,116 @@
+---
+description: アプリケーション層のテストルールとガイドライン
+globs: **/src/test/kotlin/**/application/**/*Test.kt
+alwaysApply: false
+---
+# アプリケーション層テストルール
+
+File patterns: **/src/test/kotlin/**/application/**/*Test.kt
+
+## 基本原則
+
+1. **依存性のモック化**: リポジトリやサービスなどの依存コンポーネントはモック化する
+2. **ユースケースの検証**: ビジネスフロー全体が正しく実行されることを検証する
+3. **入出力の検証**: コマンド/クエリの変換と結果の変換が正しく行われることを検証する
+4. **例外処理の検証**: エラーケースでの振る舞いを検証する
+
+## ユースケーステスト
+
+ユースケースのテストでは、次の点を検証します：
+
+1. 正常系の実行フローが期待通りに動作すること
+2. 各種例外ケースが適切に処理されること
+3. 依存コンポーネントが期待通りに呼び出されること
+
+```kotlin
+class CreateUserUseCaseTest : DescribeSpec({
+    // モックの準備
+    val userRepository = mockk<UserRepository>()
+    val notificationService = mockk<NotificationService>()
+    val useCase = CreateUserUseCase(userRepository, notificationService)
+    
+    describe("execute") {
+        context("with valid input") {
+            // Given
+            val command = CreateUserCommand("john", "john@example.com")
+            val userId = UserId.generate()
+            val savedUser = User.create("john", "john@example.com").apply {
+                setId(userId)
+            }
+            
+            every { userRepository.existsByEmail(any()) } returns false
+            every { userRepository.save(any()) } returns savedUser
+            every { notificationService.sendWelcomeMessage(any()) } just Runs
+            
+            it("should create user and return user ID") {
+                // When
+                val result = useCase.execute(command)
+                
+                // Then
+                result shouldBe userId
+                verify { userRepository.existsByEmail(Email("john@example.com")) }
+                verify { userRepository.save(any()) }
+                verify { notificationService.sendWelcomeMessage(savedUser) }
+            }
+        }
+        
+        context("with duplicate email") {
+            // Given
+            val command = CreateUserCommand("john", "john@example.com")
+            
+            every { userRepository.existsByEmail(any()) } returns true
+            
+            it("should throw DuplicateEmailException") {
+                // When/Then
+                shouldThrow<DuplicateEmailException> {
+                    useCase.execute(command)
+                }
+                
+                verify { userRepository.existsByEmail(Email("john@example.com")) }
+                verify(exactly = 0) { userRepository.save(any()) }
+                verify(exactly = 0) { notificationService.sendWelcomeMessage(any()) }
+            }
+        }
+    }
+})
+```
+
+## イベントハンドラーテスト
+
+イベントハンドラーのテストでは、次の点を検証します：
+
+1. イベントに応じた処理が正しく行われること
+2. 依存コンポーネントが期待通りに呼び出されること
+
+```kotlin
+class UserCreatedEventHandlerTest : DescribeSpec({
+    // モックの準備
+    val userRepository = mockk<UserRepository>()
+    val auditService = mockk<AuditService>()
+    val handler = UserCreatedEventHandler(userRepository, auditService)
+    
+    describe("handle") {
+        // Given
+        val userId = UserId.generate()
+        val event = UserCreatedEvent(userId, "john", "john@example.com")
+        
+        every { userRepository.findById(userId) } returns User.create("john", "john@example.com").apply {
+            setId(userId)
+        }
+        every { auditService.recordUserCreation(any()) } just Runs
+        
+        it("should audit user creation") {
+            // When
+            handler.handle(event)
+            
+            // Then
+            verify { userRepository.findById(userId) }
+            verify { auditService.recordUserCreation(any()) }
+        }
+    }
+})
+```
+
+## まとめ
+
+アプリケーション層のテストでは、ビジネスフローが正しく実装されていることを検証します。依存コンポーネントをモック化することで、テストの焦点をユースケースのロジックに絞り、迅速なフィードバックサイクルを実現します。 

@@ -1,0 +1,182 @@
+---
+description: リポジトリのテストルールとガイドライン
+globs: **/src/test/kotlin/**/adapter/persistence/repository/**/*Test.kt
+alwaysApply: false
+---
+# リポジトリテストルール
+
+File patterns: **/src/test/kotlin/**/adapter/persistence/repository/**/*Test.kt
+
+## 基本原則
+
+1. **実DB利用**: テストは実際のテストデータベースに対して行う
+2. **前提データの準備**: テストに必要なデータを事前に準備する
+3. **トランザクション管理**: テストはトランザクション内で実行し、孤立させる
+4. **データのクリーンアップ**: テスト後にデータを適切に削除する
+
+## テストデータベースの準備
+
+TestContainersを使用してテストデータベースを準備します：
+
+```kotlin
+@Testcontainers
+class EntityRepositoryImplTest : FunSpec({
+    companion object {
+        @Container
+        val postgresContainer = PostgreSQLContainer<Nothing>("postgres:14").apply {
+            withDatabaseName("testdb")
+            withUsername("test")
+            withPassword("test")
+        }
+    }
+    
+    // データソースとリポジトリの設定
+    val dataSource = HikariDataSource().apply {
+        jdbcUrl = postgresContainer.jdbcUrl
+        username = postgresContainer.username
+        password = postgresContainer.password
+        maximumPoolSize = 5
+    }
+    
+    val dslContext = DSL.using(
+        dataSource,
+        SQLDialect.POSTGRES
+    )
+    
+    val entityMapper = EntityMapper()
+    val repository = EntityRepositoryImpl(dslContext, entityMapper)
+    
+    beforeSpec {
+        // スキーマ初期化
+        dslContext.execute("""
+            CREATE TABLE entities (
+                id VARCHAR(36) PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                attribute VARCHAR(100) NOT NULL UNIQUE,
+                created_at TIMESTAMP NOT NULL
+            )
+        """)
+    }
+    
+    beforeEach {
+        // テストデータ作成
+        dslContext.execute("""
+            INSERT INTO entities (id, name, attribute, created_at)
+            VALUES ('test-id-1', 'Test Entity 1', 'test-attribute-1', now())
+        """)
+    }
+    
+    afterEach {
+        // テストデータ削除
+        dslContext.execute("DELETE FROM entities")
+    }
+    
+    afterSpec {
+        // 接続のクローズ
+        dataSource.close()
+    }
+    
+    // テスト内容
+    test("findById should return entity when exists") {
+        // When
+        val entity = repository.findById(EntityId("test-id-1"))
+        
+        // Then
+        entity shouldNotBe null
+        entity!!.apply {
+            id.value shouldBe "test-id-1"
+            name shouldBe "Test Entity 1"
+            attribute.value shouldBe "test-attribute-1"
+        }
+    }
+    
+    test("findById should return null when entity does not exist") {
+        // When
+        val entity = repository.findById(EntityId("non-existent-id"))
+        
+        // Then
+        entity shouldBe null
+    }
+    
+    test("save should insert new entity") {
+        // Given
+        val entityId = EntityId.generate()
+        val entity = Entity.create("New Entity", "new-attribute")
+        entity.setId(entityId)
+        
+        // When
+        repository.save(entity)
+        
+        // Then
+        val saved = repository.findById(entityId)
+        saved shouldNotBe null
+        saved!!.apply {
+            id shouldBe entityId
+            name shouldBe "New Entity"
+            attribute.value shouldBe "new-attribute"
+        }
+    }
+    
+    test("save should update existing entity") {
+        // Given
+        val entityId = EntityId("test-id-1")
+        val entity = repository.findById(entityId)!!
+        entity.updateName("Updated Name")
+        
+        // When
+        repository.save(entity)
+        
+        // Then
+        val updated = repository.findById(entityId)
+        updated shouldNotBe null
+        updated!!.apply {
+            id.value shouldBe "test-id-1"
+            name shouldBe "Updated Name"
+            attribute.value shouldBe "test-attribute-1"
+        }
+    }
+    
+    test("delete should remove entity") {
+        // Given
+        val entityId = EntityId("test-id-1")
+        
+        // When
+        repository.delete(entityId)
+        
+        // Then
+        val deleted = repository.findById(entityId)
+        deleted shouldBe null
+    }
+})
+```
+
+## jOOQを使用したリポジトリテスト
+
+jOOQを使用する場合は、テーブル名のハードコーディングではなく、生成されたテーブルクラスを使用します：
+
+```kotlin
+test("saveAll should insert multiple entities") {
+    // Given
+    val entities = listOf(
+        Entity.create("Batch Entity 1", "batch-attribute-1").apply { setId(EntityId.generate()) },
+        Entity.create("Batch Entity 2", "batch-attribute-2").apply { setId(EntityId.generate()) },
+        Entity.create("Batch Entity 3", "batch-attribute-3").apply { setId(EntityId.generate()) }
+    )
+    
+    // When
+    repository.saveAll(entities)
+    
+    // Then
+    val entityIds = entities.map { it.id }
+    val saved = repository.findAllByIds(entityIds)
+    
+    saved shouldHaveSize 3
+    saved.map { it.name } should containAll(
+        entities.map { it.name }
+    )
+}
+```
+
+## まとめ
+
+リポジトリテストでは、実際のデータベースを使用して、データアクセスコードが正しく機能するかを検証します。TestContainersを使用してテストデータベースを準備し、各テストの前後で適切にデータを管理することで、テストの再現性と信頼性を確保できます。jOOQを利用することで、型安全なデータアクセスが可能になります。 

@@ -1,0 +1,148 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: ドメイン層のテストパターンとガイドライン
+globs: **/src/test/kotlin/**/domain/**/*Test.kt
+alwaysApply: false
+---
+# ドメイン層のテストルールとガイドライン
+
+## 実装方針
+
+このガイドラインは、AIがドメイン層のテストコードを生成・修正する際の一貫した方針を定義します。以下の原則に従ってください：
+
+1. **ビヘイビア駆動**: テストはドメインの振る舞いを検証する。技術的な実装ではなく、ビジネスルールを検証することに焦点を当てる
+2. **明確なテスト構造**: given-when-then またはarrange-act-assertパターンに沿ってテストを構造化する
+3. **テスト分離**: 各テストは他のテストから独立していること
+4. **命名の一貫性**: テスト名は「should + 期待される結果 + when + 条件」の形式で記述する
+5. **検証の厳密さ**: 境界値や異常系を含めた厳密な検証を行う
+
+これらの原則はファイルの詳細な内容よりも優先され、テストコード生成時や修正時の指針となります。
+
+## ファイルパターン
+
+**/src/test/kotlin/**/domain/**/*Test.kt
+
+## 基本原則
+
+1. ドメイン層のテストでは、モックを最小限に抑え、実際のドメインオブジェクトの振る舞いをテストします
+2. 値オブジェクト、エンティティ、ドメインサービスの単体テストに焦点を当てます
+3. テストは読みやすく、理解しやすいものであるべきです
+4. 各テストは単一の振る舞いや検証に集中すべきです
+
+## テストフレームワーク
+
+Kotlin + KotestとAssertJを使用することを推奨します。
+
+```kotlin
+class DomainTest : DescribeSpec({
+    describe("ドメインオブジェクト") {
+        it("should 期待される結果 when 条件") {
+            // Arrange
+            val entity = Entity.create("name", "attribute")
+            
+            // Act
+            val result = entity.performAction()
+            
+            // Assert
+            result shouldBe expectedValue
+        }
+    }
+})
+```
+
+## 値オブジェクトのテスト
+
+値オブジェクトのテストでは以下の点を検証します：
+
+1. 有効な値での作成
+2. 無効な値での例外発生
+3. 等価性の検証
+4. 不変性の検証
+
+## エンティティのテスト
+
+エンティティのテストでは以下の点を検証します：
+
+1. 正しい初期状態での作成
+2. ビジネスルールに従った状態変更
+3. 無効な操作に対する制約の検証
+4. ドメインイベントの発行
+
+## ドメインサービスのテスト
+
+ドメインサービスのテストでは以下の点を検証します：
+
+1. 複数エンティティ間のコーディネーション
+2. 複雑なドメインロジックの検証
+3. 外部依存をモックした場合の振る舞い
+
+## テストケースの例
+
+### 値オブジェクトのテスト例
+
+```kotlin
+describe("EmailAddress") {
+    it("should create valid email") {
+        val email = EmailAddress.from("test@example.com")
+        email.value shouldBe "test@example.com"
+    }
+    
+    it("should throw exception for invalid email") {
+        shouldThrow<IllegalArgumentException> {
+            EmailAddress.from("invalid-email")
+        }
+    }
+    
+    it("should be equal when values are same") {
+        val email1 = EmailAddress.from("test@example.com")
+        val email2 = EmailAddress.from("test@example.com")
+        email1 shouldBe email2
+    }
+}
+```
+
+### エンティティのテスト例
+
+```kotlin
+describe("Entity") {
+    context("when performing an action") {
+        it("should update state when preconditions are met") {
+            // Arrange
+            val entity = Entity.create("name", "attribute")
+            
+            // Act
+            val updatedEntity = entity.performAction("new value")
+            
+            // Assert
+            updatedEntity.attribute shouldBe "new value"
+            updatedEntity.updatedAt shouldBeGreaterThan entity.updatedAt
+        }
+        
+        it("should throw exception when preconditions are not met") {
+            // Arrange
+            val entity = Entity.create("name", "attribute").deactivate()
+            
+            // Act & Assert
+            shouldThrow<IllegalStateException> {
+                entity.performAction("new value")
+            }
+        }
+    }
+}
+```
+
+## テストの品質基準
+
+1. **網羅性**: ビジネスルールを網羅するテストケースが存在すること
+2. **独立性**: テスト間の依存がないこと
+3. **再現性**: テストは何度実行しても同じ結果が得られること
+4. **可読性**: テストコードは仕様書として機能するほど明確であること
+5. **保守性**: テストコードはドメインの変更に合わせて容易に更新できること
+
+## まとめ
+
+ドメイン層のテストは、ビジネスルールの正確な実装を保証する重要な手段です。テストはドキュメントとしても機能し、ドメインの振る舞いを明確に記述します。テストの品質を維持することで、ドメインモデルの変更に対する自信を持つことができます。 

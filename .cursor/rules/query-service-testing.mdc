@@ -1,0 +1,209 @@
+---
+description: クエリサービスのテストルールとガイドライン
+globs: **/src/test/kotlin/**/application/query/**/*Test.kt, **/src/test/kotlin/**/adapter/persistence/query/**/*Test.kt
+alwaysApply: false
+---
+# クエリサービステストルール
+
+File patterns: **/src/test/kotlin/**/application/query/**/*Test.kt, **/src/test/kotlin/**/adapter/persistence/query/**/*Test.kt
+
+## 基本原則
+
+1. **実DB利用**: テストは実際のデータベースに対して行う
+2. **クエリ結果検証**: 複雑なクエリの結果が期待通りであることを確認する
+3. **性能検証**: クエリのパフォーマンスが許容範囲内であることを確認する
+4. **jOOQクエリの型安全性**: jOOQで構築されたクエリの型安全性を検証する
+
+## テスト環境のセットアップ
+
+クエリサービスのテストでは、TestContainersを使用した実際のデータベースを利用することを推奨します：
+
+```kotlin
+@Testcontainers
+class EntityQueryServiceTest : FunSpec({
+    companion object {
+        @Container
+        val postgresContainer = PostgreSQLContainer<Nothing>("postgres:14").apply {
+            withDatabaseName("testdb")
+            withUsername("test")
+            withPassword("test")
+        }
+        
+        lateinit var dataSource: HikariDataSource
+        lateinit var dslContext: DSLContext
+        
+        @BeforeAll
+        @JvmStatic
+        fun beforeAll() {
+            postgresContainer.start()
+            
+            dataSource = HikariDataSource().apply {
+                jdbcUrl = postgresContainer.jdbcUrl
+                username = postgresContainer.username
+                password = postgresContainer.password
+                maximumPoolSize = 5
+            }
+            
+            dslContext = DSL.using(
+                dataSource,
+                SQLDialect.POSTGRES
+            )
+            
+            // テーブル作成
+            dslContext.execute("""
+                CREATE TABLE entities (
+                    id VARCHAR(36) PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    attribute VARCHAR(100) NOT NULL,
+                    status VARCHAR(20) NOT NULL,
+                    created_at TIMESTAMP NOT NULL
+                );
+                
+                CREATE TABLE sub_items (
+                    id VARCHAR(36) PRIMARY KEY,
+                    entity_id VARCHAR(36) NOT NULL REFERENCES entities(id),
+                    title VARCHAR(100) NOT NULL,
+                    content TEXT,
+                    created_at TIMESTAMP NOT NULL
+                );
+            """)
+        }
+        
+        @AfterAll
+        @JvmStatic
+        fun afterAll() {
+            dataSource.close()
+            postgresContainer.stop()
+        }
+    }
+    
+    lateinit var queryService: EntityQueryService
+    
+    beforeEach {
+        // テストデータの挿入
+        dslContext.batch(
+            dslContext.insertInto(ENTITIES,
+                ENTITIES.ID, ENTITIES.NAME, ENTITIES.ATTRIBUTE, ENTITIES.STATUS, ENTITIES.CREATED_AT)
+                .values("entity1", "Entity 1", "attr1", "ACTIVE", LocalDateTime.now()),
+            dslContext.insertInto(ENTITIES,
+                ENTITIES.ID, ENTITIES.NAME, ENTITIES.ATTRIBUTE, ENTITIES.STATUS, ENTITIES.CREATED_AT)
+                .values("entity2", "Entity 2", "attr2", "INACTIVE", LocalDateTime.now()),
+            dslContext.insertInto(SUB_ITEMS,
+                SUB_ITEMS.ID, SUB_ITEMS.ENTITY_ID, SUB_ITEMS.TITLE, SUB_ITEMS.CONTENT, SUB_ITEMS.CREATED_AT)
+                .values("item1", "entity1", "Item 1", "Content 1", LocalDateTime.now()),
+            dslContext.insertInto(SUB_ITEMS,
+                SUB_ITEMS.ID, SUB_ITEMS.ENTITY_ID, SUB_ITEMS.TITLE, SUB_ITEMS.CONTENT, SUB_ITEMS.CREATED_AT)
+                .values("item2", "entity1", "Item 2", "Content 2", LocalDateTime.now())
+        ).execute()
+        
+        queryService = EntityQueryService(dslContext)
+    }
+    
+    afterEach {
+        // テストデータのクリーンアップ
+        dslContext.deleteFrom(SUB_ITEMS).execute()
+        dslContext.deleteFrom(ENTITIES).execute()
+    }
+    
+    test("findEntitiesByStatus should return correct results") {
+        // When
+        val result = queryService.findEntitiesByStatus("ACTIVE")
+        
+        // Then
+        result shouldHaveSize 1
+        result[0].name shouldBe "Entity 1"
+        result[0].attribute shouldBe "attr1"
+    }
+    
+    test("findEntityWithItems should return entity with its items") {
+        // When
+        val result = queryService.findEntityWithItems("entity1")
+        
+        // Then
+        result shouldNotBeNull()
+        result.name shouldBe "Entity 1"
+        result.items shouldHaveSize 2
+        result.items[0].title shouldBe "Item 1"
+        result.items[1].title shouldBe "Item 2"
+    }
+    
+    test("getEntityActivitySummary should return correct counts") {
+        // When
+        val result = queryService.getEntityActivitySummary("entity1")
+        
+        // Then
+        result shouldNotBeNull()
+        result.entityName shouldBe "Entity 1"
+        result.itemCount shouldBe 2
+        result.isActive shouldBe true
+    }
+    
+    test("complex query should complete within time limit") {
+        // Insert more test data for performance testing
+        val batch = dslContext.batch()
+        
+        repeat(100) { i ->
+            batch.add(
+                dslContext.insertInto(SUB_ITEMS,
+                    SUB_ITEMS.ID, SUB_ITEMS.ENTITY_ID, SUB_ITEMS.TITLE, SUB_ITEMS.CONTENT, SUB_ITEMS.CREATED_AT)
+                    .values("item${i+3}", "entity1", "Item ${i+3}", "Content ${i+3}", LocalDateTime.now())
+            )
+        }
+        
+        batch.execute()
+        
+        // When/Then
+        shouldCompleteWithin(Duration.ofSeconds(1)) {
+            val result = queryService.findAllEntityItemsWithDetails("entity1")
+            result shouldHaveSize 102
+        }
+    }
+    
+    test("query should not have N+1 problem when fetching entities with items") {
+        // Insert more test data
+        val batch = dslContext.batch()
+        
+        repeat(10) { i ->
+            val entityId = "perf_entity$i"
+            batch.add(
+                dslContext.insertInto(ENTITIES,
+                    ENTITIES.ID, ENTITIES.NAME, ENTITIES.ATTRIBUTE, ENTITIES.STATUS, ENTITIES.CREATED_AT)
+                    .values(entityId, "Perf Entity $i", "attr$i", "ACTIVE", LocalDateTime.now())
+            )
+            
+            repeat(5) { j ->
+                batch.add(
+                    dslContext.insertInto(SUB_ITEMS,
+                        SUB_ITEMS.ID, SUB_ITEMS.ENTITY_ID, SUB_ITEMS.TITLE, SUB_ITEMS.CONTENT, SUB_ITEMS.CREATED_AT)
+                        .values("perf_item${i}_${j}", entityId, "Item $j", "Content $j", LocalDateTime.now())
+                )
+            }
+        }
+        
+        batch.execute()
+        
+        // When/Then
+        val counts = mutableListOf<Int>()
+        val listener = QueryExecutionListener { _, query ->
+            if (query.sql.contains("SELECT") && !query.sql.contains("information_schema")) {
+                counts.add(1)
+            }
+        }
+        
+        DatabaseConfig.addListener(listener)
+        try {
+            val results = queryService.findAllEntitiesWithItems()
+            results shouldHaveSize 12 // 2 original + 10 new
+            
+            // Expecting only 1 query, not 1+N queries
+            counts.size shouldBe 1
+        } finally {
+            DatabaseConfig.removeListener(listener)
+        }
+    }
+})
+```
+
+## まとめ
+
+クエリサービスのテストでは、実際のデータベースを使用することで、正確なデータアクセスを検証します。jOOQのようなツールを使用することで型安全なクエリを実現し、効率的なデータアクセスを確保しながら、テストデータを準備して再現性と信頼性の高いテストを作成しましょう。 
